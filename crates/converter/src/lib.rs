@@ -73,6 +73,7 @@ struct Dictionary {
 pub struct NativeConverter {
     dictionary: Dictionary,
     user_dictionary: UserDictionary,
+    emoji_dictionary: EmojiDictionary,
     learning: LearningStore,
     raw_input: String,
     hiragana: String,
@@ -87,6 +88,7 @@ impl Default for NativeConverter {
         Self {
             dictionary: Dictionary::default(),
             user_dictionary: UserDictionary::load(default_user_dictionary_path()),
+            emoji_dictionary: EmojiDictionary::default(),
             learning: LearningStore::load(default_learning_path()),
             raw_input: String::new(),
             hiragana: String::new(),
@@ -105,6 +107,7 @@ impl NativeConverter {
     pub fn load(resource_dir: impl AsRef<Path>) -> Self {
         let dictionary = Dictionary::load(resource_dir.as_ref().join("Dictionary"));
         let user_dictionary = UserDictionary::load(default_user_dictionary_path());
+        let emoji_dictionary = EmojiDictionary::load(resource_dir.as_ref().join("EmojiDictionary"));
         let learning = LearningStore::load(default_learning_path());
         let zenzai_config = ZenzaiConfig::disabled(
             resource_dir.as_ref().join(DEFAULT_ZENZAI_MODEL),
@@ -113,6 +116,7 @@ impl NativeConverter {
         Self {
             dictionary,
             user_dictionary,
+            emoji_dictionary,
             learning,
             zenzai_config,
             ..Default::default()
@@ -177,6 +181,7 @@ impl NativeConverter {
         }
 
         let mut candidates = self.user_dictionary.lookup_best_prefixes(&self.hiragana);
+        candidates.extend(self.emoji_dictionary.lookup_best_prefixes(&self.hiragana));
         if self.conversion_config.learning_enabled {
             candidates.extend(self.learning.lookup_best_prefixes(&self.hiragana));
         }
@@ -185,6 +190,7 @@ impl NativeConverter {
         }
         if self.conversion_config.prediction_enabled {
             candidates.extend(self.user_dictionary.lookup_predictions(&self.hiragana));
+            candidates.extend(self.emoji_dictionary.lookup_predictions(&self.hiragana));
             if self.conversion_config.learning_enabled {
                 candidates.extend(self.learning.lookup_predictions(&self.hiragana));
             }
@@ -489,6 +495,106 @@ impl UserDictionary {
             .take(MAX_RETURNED_CANDIDATES)
             .collect()
     }
+}
+
+#[derive(Debug, Default)]
+struct EmojiDictionary {
+    entries: HashMap<String, Vec<String>>,
+}
+
+impl EmojiDictionary {
+    fn load(dictionary_dir: PathBuf) -> Self {
+        let Some(path) = latest_emoji_dictionary_path(&dictionary_dir) else {
+            return Self::default();
+        };
+        Self::load_file(&path)
+    }
+
+    fn load_file(path: &Path) -> Self {
+        let Ok(content) = fs::read_to_string(path) else {
+            return Self::default();
+        };
+
+        let mut entries: HashMap<String, Vec<String>> = HashMap::new();
+        for line in content.lines() {
+            let mut fields = line.split('\t');
+            let Some(emoji) = fields.next().map(str::trim) else {
+                continue;
+            };
+            let Some(keywords) = fields.next().map(str::trim) else {
+                continue;
+            };
+            if emoji.is_empty() || keywords.is_empty() {
+                continue;
+            }
+            for keyword in keywords.split(',').map(str::trim) {
+                if keyword.is_empty() {
+                    continue;
+                }
+                let values = entries.entry(keyword.to_string()).or_default();
+                if !values.iter().any(|value| value == emoji) {
+                    values.push(emoji.to_string());
+                }
+            }
+        }
+
+        Self { entries }
+    }
+
+    fn lookup_best_prefixes(&self, hiragana: &str) -> Vec<Candidate> {
+        let length = hiragana.chars().count();
+        let mut candidates = Vec::new();
+
+        for prefix_len in (1..=length).rev() {
+            let prefix = take_chars(hiragana, prefix_len);
+            let Some(entries) = self.entries.get(&prefix) else {
+                continue;
+            };
+            let subtext = skip_chars(hiragana, prefix_len);
+            for emoji in entries {
+                candidates.push(Candidate {
+                    text: emoji.clone(),
+                    subtext: subtext.clone(),
+                    corresponding_count: prefix_len as i32,
+                });
+                if candidates.len() >= MAX_RETURNED_CANDIDATES {
+                    return candidates;
+                }
+            }
+        }
+
+        candidates
+    }
+
+    fn lookup_predictions(&self, hiragana: &str) -> Vec<Candidate> {
+        let length = hiragana.chars().count();
+        self.entries
+            .iter()
+            .filter(|(reading, _)| reading.starts_with(hiragana) && reading.as_str() != hiragana)
+            .flat_map(|(_, entries)| entries.iter())
+            .map(|emoji| Candidate {
+                text: emoji.clone(),
+                subtext: String::new(),
+                corresponding_count: length as i32,
+            })
+            .take(MAX_RETURNED_CANDIDATES)
+            .collect()
+    }
+}
+
+fn latest_emoji_dictionary_path(dictionary_dir: &Path) -> Option<PathBuf> {
+    let mut files = fs::read_dir(dictionary_dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("emoji_all_E") && name.ends_with(".txt"))
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    files.pop()
 }
 
 #[derive(Debug, Default)]
@@ -1032,5 +1138,24 @@ mod tests {
 
         let candidates = converter.append_text("kanji");
         assert!(!candidates.iter().any(|candidate| candidate.text == "漢字"));
+    }
+
+    #[test]
+    fn emoji_dictionary_candidates_are_returned() {
+        let path = std::env::temp_dir().join(format!(
+            "azookey-emoji-dictionary-{}.txt",
+            std::process::id()
+        ));
+        fs::write(&path, "😀\tえがお,すまいる\t\n").unwrap();
+
+        let mut converter = NativeConverter {
+            emoji_dictionary: EmojiDictionary::load_file(&path),
+            ..Default::default()
+        };
+
+        let candidates = converter.append_text("egao");
+        assert_eq!(candidates[0].text, "😀");
+
+        let _ = fs::remove_file(path);
     }
 }
