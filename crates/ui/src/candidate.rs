@@ -205,6 +205,9 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
 
                     function updateSelection(index) {
                         const candidateList = document.getElementById('candidate-list');
+                        if (!candidateList.children.length || !candidateList.children[index]) {
+                            return;
+                        }
                         const selected = candidateList.querySelector('[data-selected]');
                         if (selected) {
                             selected.removeAttribute('data-selected');
