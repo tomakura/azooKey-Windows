@@ -1,6 +1,11 @@
-use azookey_converter::{Candidate as NativeCandidate, NativeConverter};
+use azookey_converter::{
+    Candidate as NativeCandidate, NativeConverter, ZenzaiConfig as NativeZenzaiConfig,
+};
 use azookey_server::TonicNamedPipeServer;
-use std::sync::{Arc, Mutex};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
 use tonic::{transport::Server, Request, Response, Status};
 use tonic_reflection::server::Builder as ReflectionBuilder;
 
@@ -27,15 +32,17 @@ fn response_from_parts(hiragana: String, candidates: Vec<NativeCandidate>) -> Co
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MyAzookeyService {
     converter: Arc<Mutex<NativeConverter>>,
+    resource_dir: Arc<PathBuf>,
 }
 
 impl MyAzookeyService {
-    fn new(converter: NativeConverter) -> Self {
+    fn new(converter: NativeConverter, resource_dir: PathBuf) -> Self {
         Self {
             converter: Arc::new(Mutex::new(converter)),
+            resource_dir: Arc::new(resource_dir),
         }
     }
 
@@ -48,6 +55,30 @@ impl MyAzookeyService {
             .lock()
             .map_err(|_| Status::internal("converter mutex poisoned"))?;
         Ok(update(&mut converter))
+    }
+
+    fn apply_config(&self) -> Result<(), Status> {
+        let config = shared::AppConfig::new();
+        let model_path = if config.zenzai.model_path.trim().is_empty() {
+            self.resource_dir.join("zenz.gguf")
+        } else {
+            PathBuf::from(&config.zenzai.model_path)
+        };
+        let command_path = if config.zenzai.command_path.trim().is_empty() {
+            self.resource_dir.join("llama-cli.exe")
+        } else {
+            PathBuf::from(&config.zenzai.command_path)
+        };
+
+        self.with_converter(|converter| {
+            converter.configure_zenzai(NativeZenzaiConfig {
+                enabled: config.zenzai.enable,
+                model_path,
+                command_path,
+                profile: config.zenzai.profile,
+                inference_limit: config.zenzai.inference_limit,
+            });
+        })
     }
 }
 
@@ -138,6 +169,7 @@ impl AzookeyService for MyAzookeyService {
         &self,
         _: Request<shared::proto::UpdateConfigRequest>,
     ) -> Result<Response<shared::proto::UpdateConfigResponse>, Status> {
+        self.apply_config()?;
         Ok(Response::new(shared::proto::UpdateConfigResponse {}))
     }
 }
@@ -148,9 +180,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let current_exe = std::env::current_exe()?;
     let resource_dir = current_exe
         .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
-    let converter = NativeConverter::load(resource_dir);
-    let service = MyAzookeyService::new(converter);
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+    let converter = NativeConverter::load(&resource_dir);
+    let service = MyAzookeyService::new(converter, resource_dir);
+    service.apply_config()?;
 
     println!("AzookeyServer listening");
 

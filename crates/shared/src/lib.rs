@@ -20,6 +20,12 @@ pub struct ZenzaiConfig {
     pub enable: bool,
     pub profile: String,
     pub backend: String,
+    #[serde(default = "default_zenzai_inference_limit")]
+    pub inference_limit: usize,
+    #[serde(default)]
+    pub model_path: String,
+    #[serde(default)]
+    pub command_path: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -36,9 +42,16 @@ impl Default for AppConfig {
                 enable: false,
                 profile: "".to_string(),
                 backend: "cpu".to_string(),
+                inference_limit: default_zenzai_inference_limit(),
+                model_path: "".to_string(),
+                command_path: "".to_string(),
             },
         }
     }
+}
+
+fn default_zenzai_inference_limit() -> usize {
+    1
 }
 
 impl AppConfig {

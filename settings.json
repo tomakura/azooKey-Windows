@@ -3,6 +3,9 @@
     "zenzai": {
         "enable": false,
         "profile": "",
-        "backend": "cpu"
+        "backend": "cpu",
+        "inference_limit": 1,
+        "model_path": "",
+        "command_path": ""
     }
 }

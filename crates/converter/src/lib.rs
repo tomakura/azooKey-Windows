@@ -3,10 +3,13 @@ use std::{
     fs,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
+    process::Command,
 };
 
 const MAX_DICTIONARY_CANDIDATES_PER_KEY: usize = 32;
 const MAX_RETURNED_CANDIDATES: usize = 16;
+const DEFAULT_ZENZAI_MODEL: &str = "zenz.gguf";
+const DEFAULT_ZENZAI_COMMAND: &str = "llama-cli.exe";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
@@ -21,26 +24,74 @@ struct DictionaryEntry {
     score: f32,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
+pub struct ZenzaiConfig {
+    pub enabled: bool,
+    pub model_path: PathBuf,
+    pub command_path: PathBuf,
+    pub profile: String,
+    pub inference_limit: usize,
+}
+
+impl ZenzaiConfig {
+    pub fn disabled(model_path: PathBuf, command_path: PathBuf) -> Self {
+        Self {
+            enabled: false,
+            model_path,
+            command_path,
+            profile: String::new(),
+            inference_limit: 1,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
 struct Dictionary {
     entries: HashMap<String, Vec<DictionaryEntry>>,
 }
 
-#[derive(Clone, Debug, Default)]
 pub struct NativeConverter {
     dictionary: Dictionary,
     raw_input: String,
     hiragana: String,
     context: String,
+    zenzai_config: ZenzaiConfig,
+    zenzai: ZenzaiEngine,
+}
+
+impl Default for NativeConverter {
+    fn default() -> Self {
+        Self {
+            dictionary: Dictionary::default(),
+            raw_input: String::new(),
+            hiragana: String::new(),
+            context: String::new(),
+            zenzai_config: ZenzaiConfig::disabled(
+                PathBuf::from(DEFAULT_ZENZAI_MODEL),
+                PathBuf::from(DEFAULT_ZENZAI_COMMAND),
+            ),
+            zenzai: ZenzaiEngine::default(),
+        }
+    }
 }
 
 impl NativeConverter {
     pub fn load(resource_dir: impl AsRef<Path>) -> Self {
         let dictionary = Dictionary::load(resource_dir.as_ref().join("Dictionary"));
+        let zenzai_config = ZenzaiConfig::disabled(
+            resource_dir.as_ref().join(DEFAULT_ZENZAI_MODEL),
+            resource_dir.as_ref().join(DEFAULT_ZENZAI_COMMAND),
+        );
         Self {
             dictionary,
+            zenzai_config,
             ..Default::default()
         }
+    }
+
+    pub fn configure_zenzai(&mut self, config: ZenzaiConfig) {
+        self.zenzai_config = config;
+        self.zenzai.reset();
     }
 
     pub fn append_text(&mut self, input: &str) -> Vec<Candidate> {
@@ -75,7 +126,7 @@ impl NativeConverter {
         &self.hiragana
     }
 
-    pub fn candidates(&self) -> Vec<Candidate> {
+    pub fn candidates(&mut self) -> Vec<Candidate> {
         if self.hiragana.is_empty() {
             return Vec::new();
         }
@@ -86,12 +137,94 @@ impl NativeConverter {
             subtext: String::new(),
             corresponding_count: self.hiragana.chars().count() as i32,
         });
-        dedupe_candidates(candidates)
+        let candidates = dedupe_candidates(candidates);
+        self.zenzai.rerank(
+            &self.zenzai_config,
+            &self.context,
+            &self.hiragana,
+            candidates,
+        )
     }
 
     fn refresh_hiragana(&mut self) {
         self.hiragana = roman_to_hiragana(&self.raw_input);
     }
+}
+
+#[derive(Default)]
+struct ZenzaiEngine;
+
+impl ZenzaiEngine {
+    fn reset(&mut self) {}
+
+    fn rerank(
+        &mut self,
+        config: &ZenzaiConfig,
+        context: &str,
+        hiragana: &str,
+        candidates: Vec<Candidate>,
+    ) -> Vec<Candidate> {
+        if !config.enabled
+            || candidates.len() <= 1
+            || !config.model_path.exists()
+            || !config.command_path.exists()
+        {
+            return candidates;
+        }
+
+        let numbered = candidates
+            .iter()
+            .enumerate()
+            .map(|(index, candidate)| format!("{}: {}", index + 1, candidate.text))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let prompt = format!(
+            "あなたは日本語IMEの変換候補を選ぶエンジンです。\n文脈: {}\nプロフィール: {}\n読み: {}\n候補:\n{}\n最も自然な候補の番号だけを1つ出力してください。",
+            context, config.profile, hiragana, numbered
+        );
+
+        let limit = config.inference_limit.max(1);
+        let Ok(output) = Command::new(&config.command_path)
+            .arg("-m")
+            .arg(&config.model_path)
+            .arg("-n")
+            .arg(limit.to_string())
+            .arg("--temp")
+            .arg("0")
+            .arg("--no-display-prompt")
+            .arg("-p")
+            .arg(prompt)
+            .output()
+        else {
+            return candidates;
+        };
+        if !output.status.success() {
+            return candidates;
+        }
+
+        let output = String::from_utf8_lossy(&output.stdout);
+
+        let Some(index) = output
+            .chars()
+            .find(|ch| ch.is_ascii_digit())
+            .and_then(|ch| ch.to_digit(10))
+            .and_then(|value| value.checked_sub(1))
+            .map(|value| value as usize)
+        else {
+            return candidates;
+        };
+
+        promote_candidate(candidates, index)
+    }
+}
+
+fn promote_candidate(mut candidates: Vec<Candidate>, index: usize) -> Vec<Candidate> {
+    if index == 0 || index >= candidates.len() {
+        return candidates;
+    }
+    let selected = candidates.remove(index);
+    candidates.insert(0, selected);
+    candidates
 }
 
 impl Dictionary {
