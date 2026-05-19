@@ -404,6 +404,7 @@ impl<'a> Visit for JsonVisitor<'a> {
     }
 }
 
+#[allow(dead_code)]
 pub struct StringVisitor<'a> {
     string: &'a mut String,
 }
