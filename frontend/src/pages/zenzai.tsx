@@ -1,6 +1,7 @@
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Bot, User, Cpu } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Bot, User, Cpu, FileCode2, Gauge, SquareTerminal } from "lucide-react";
 import {
     Select,
     SelectContent,
@@ -50,6 +51,9 @@ export const Zenzai = () => {
         enable: false,
         profile: "",
         backend: "",
+        inference_limit: 1,
+        model_path: "",
+        command_path: "",
     });
 
     const [capability, setCapability] = useState({
@@ -67,6 +71,9 @@ export const Zenzai = () => {
                     enable: zenzai.enable,
                     profile: zenzai.profile,
                     backend: zenzai.backend,
+                    inference_limit: zenzai.inference_limit ?? 1,
+                    model_path: zenzai.model_path ?? "",
+                    command_path: zenzai.command_path ?? "",
                 });
             })
             .catch(() => {
@@ -121,10 +128,37 @@ export const Zenzai = () => {
         if (data) {
             setValue((prev) => ({ ...prev, backend }));
             toast("バックエンドが変更されました", {
-                description: "変更を適用するには、PCを再起動してください",
+                description: "変更を適用するには、IMEサーバーを再起動してください",
                 duration: 10000,
             });
         }
+    };
+
+    const handleModelPathChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const model_path = event.target.value;
+        setValue((prev) => ({ ...prev, model_path }));
+
+        updateConfig((data) => {
+            data.zenzai.model_path = model_path;
+        });
+    };
+
+    const handleCommandPathChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const command_path = event.target.value;
+        setValue((prev) => ({ ...prev, command_path }));
+
+        updateConfig((data) => {
+            data.zenzai.command_path = command_path;
+        });
+    };
+
+    const handleInferenceLimitChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const inference_limit = Math.max(1, Number(event.target.value) || 1);
+        setValue((prev) => ({ ...prev, inference_limit }));
+
+        updateConfig((data) => {
+            data.zenzai.inference_limit = inference_limit;
+        });
     };
 
     return (
@@ -156,6 +190,46 @@ export const Zenzai = () => {
                         </div>
                     </div>
                     <Textarea placeholder="例）山田太郎、数学科の学生。" value={value.profile} disabled={!value.enable} onChange={handleProfileChange} />
+                </div>
+                <div className="space-y-4 rounded-md border p-4">
+                    <div className="flex items-center space-x-4">
+                        <FileCode2 />
+                        <div className="flex-1 space-y-1">
+                            <p className="text-sm font-medium leading-none">
+                                モデル
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                空欄の場合はIMEサーバーと同じフォルダーのzenz.ggufを使用します
+                            </p>
+                        </div>
+                    </div>
+                    <Input placeholder="C:\\path\\to\\zenz.gguf" value={value.model_path} disabled={!value.enable} onChange={handleModelPathChange} />
+                </div>
+                <div className="space-y-4 rounded-md border p-4">
+                    <div className="flex items-center space-x-4">
+                        <SquareTerminal />
+                        <div className="flex-1 space-y-1">
+                            <p className="text-sm font-medium leading-none">
+                                llama.cpp CLI
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                空欄の場合はIMEサーバーと同じフォルダーのllama-cli.exeを使用します
+                            </p>
+                        </div>
+                    </div>
+                    <Input placeholder="C:\\path\\to\\llama-cli.exe" value={value.command_path} disabled={!value.enable} onChange={handleCommandPathChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Gauge />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            推論トークン数
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            候補番号を出力するための最大トークン数
+                        </p>
+                    </div>
+                    <Input className="w-24" type="number" min={1} max={8} value={value.inference_limit} disabled={!value.enable} onChange={handleInferenceLimitChange} />
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <Cpu />
