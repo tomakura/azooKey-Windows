@@ -312,6 +312,9 @@ dependencies = [
 [[package]]
 name = "azookey-converter"
 version = "0.1.0"
+dependencies = [
+ "chrono",
+]
 
 [[package]]
 name = "azookey-server"

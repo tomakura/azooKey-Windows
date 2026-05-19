@@ -1,3 +1,4 @@
+use chrono::{Datelike, Duration as ChronoDuration, Local, NaiveDate, NaiveDateTime, Timelike};
 use std::{
     collections::{HashMap, HashSet},
     fs,
@@ -185,6 +186,7 @@ impl NativeConverter {
         }
 
         let mut candidates = self.user_dictionary.lookup_best_prefixes(&self.hiragana);
+        candidates.extend(DynamicDictionary::lookup_best_prefixes(&self.hiragana));
         candidates.extend(self.emoji_dictionary.lookup_best_prefixes(&self.hiragana));
         if self.conversion_config.learning_enabled {
             candidates.extend(self.learning.lookup_best_prefixes(&self.hiragana));
@@ -194,6 +196,7 @@ impl NativeConverter {
         }
         if self.conversion_config.prediction_enabled {
             candidates.extend(self.user_dictionary.lookup_predictions(&self.hiragana));
+            candidates.extend(DynamicDictionary::lookup_predictions(&self.hiragana));
             candidates.extend(self.emoji_dictionary.lookup_predictions(&self.hiragana));
             if self.conversion_config.learning_enabled {
                 candidates.extend(self.learning.lookup_predictions(&self.hiragana));
@@ -217,6 +220,114 @@ impl NativeConverter {
     fn refresh_hiragana(&mut self) {
         self.hiragana = roman_to_hiragana(&self.raw_input);
     }
+}
+
+struct DynamicDictionary;
+
+impl DynamicDictionary {
+    fn lookup_best_prefixes(hiragana: &str) -> Vec<Candidate> {
+        Self::lookup_best_prefixes_at(hiragana, Local::now().naive_local())
+    }
+
+    fn lookup_predictions(hiragana: &str) -> Vec<Candidate> {
+        Self::lookup_predictions_at(hiragana, Local::now().naive_local())
+    }
+
+    fn lookup_best_prefixes_at(hiragana: &str, now: NaiveDateTime) -> Vec<Candidate> {
+        let length = hiragana.chars().count();
+        let mut candidates = Vec::new();
+
+        for prefix_len in (1..=length).rev() {
+            let prefix = take_chars(hiragana, prefix_len);
+            let subtext = skip_chars(hiragana, prefix_len);
+            for text in dynamic_texts_for_reading(&prefix, now) {
+                candidates.push(Candidate {
+                    text,
+                    subtext: subtext.clone(),
+                    corresponding_count: prefix_len as i32,
+                });
+                if candidates.len() >= MAX_RETURNED_CANDIDATES {
+                    return candidates;
+                }
+            }
+        }
+
+        candidates
+    }
+
+    fn lookup_predictions_at(hiragana: &str, now: NaiveDateTime) -> Vec<Candidate> {
+        let length = hiragana.chars().count();
+        dynamic_readings()
+            .iter()
+            .filter(|reading| reading.starts_with(hiragana) && **reading != hiragana)
+            .flat_map(|reading| dynamic_texts_for_reading(reading, now))
+            .map(|text| Candidate {
+                text,
+                subtext: String::new(),
+                corresponding_count: length as i32,
+            })
+            .take(MAX_RETURNED_CANDIDATES)
+            .collect()
+    }
+}
+
+fn dynamic_readings() -> &'static [&'static str] {
+    &[
+        "いま",
+        "きょう",
+        "ほんじつ",
+        "あした",
+        "あす",
+        "みょうにち",
+        "あさって",
+        "きのう",
+        "さくじつ",
+        "おととい",
+        "ことし",
+        "らいねん",
+        "きょねん",
+    ]
+}
+
+fn dynamic_texts_for_reading(reading: &str, now: NaiveDateTime) -> Vec<String> {
+    let date = now.date();
+    match reading {
+        "いま" => time_candidates(now),
+        "きょう" | "ほんじつ" => date_candidates(date),
+        "あした" | "あす" | "みょうにち" => {
+            date_candidates(date + ChronoDuration::days(1))
+        }
+        "あさって" => date_candidates(date + ChronoDuration::days(2)),
+        "きのう" | "さくじつ" => date_candidates(date - ChronoDuration::days(1)),
+        "おととい" => date_candidates(date - ChronoDuration::days(2)),
+        "ことし" => vec![date.year().to_string()],
+        "らいねん" => vec![(date.year() + 1).to_string()],
+        "きょねん" => vec![(date.year() - 1).to_string()],
+        _ => Vec::new(),
+    }
+}
+
+fn time_candidates(now: NaiveDateTime) -> Vec<String> {
+    vec![
+        format!("{:02}:{:02}", now.hour(), now.minute()),
+        format!("{}時{}分", now.hour(), now.minute()),
+    ]
+}
+
+fn date_candidates(date: NaiveDate) -> Vec<String> {
+    let weekday = japanese_weekday(date.weekday().num_days_from_sunday() as usize);
+    let era_year = date.year() - 2018;
+    vec![
+        format!("{}年{}月{}日", date.year(), date.month(), date.day()),
+        format!("{}/{}/{}", date.year(), date.month(), date.day()),
+        format!("{}月{}日", date.month(), date.day()),
+        format!("{}曜日", weekday),
+        format!("令和{}年{}月{}日", era_year, date.month(), date.day()),
+    ]
+}
+
+fn japanese_weekday(index_from_sunday: usize) -> &'static str {
+    ["日", "月", "火", "水", "木", "金", "土"][index_from_sunday]
 }
 
 #[derive(Default)]
@@ -1161,6 +1272,52 @@ mod tests {
         assert_eq!(candidates[0].text, "😀");
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn dynamic_date_candidates_are_returned() {
+        let now = NaiveDate::from_ymd_opt(2026, 5, 20)
+            .unwrap()
+            .and_hms_opt(14, 5, 0)
+            .unwrap();
+
+        let candidates = DynamicDictionary::lookup_best_prefixes_at("きょうは", now);
+        assert_eq!(candidates[0].text, "2026年5月20日");
+        assert_eq!(candidates[0].subtext, "は");
+        assert_eq!(candidates[0].corresponding_count, 3);
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.text == "令和8年5月20日"));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.text == "水曜日"));
+    }
+
+    #[test]
+    fn dynamic_time_candidates_are_returned() {
+        let now = NaiveDate::from_ymd_opt(2026, 5, 20)
+            .unwrap()
+            .and_hms_opt(14, 5, 0)
+            .unwrap();
+
+        let candidates = DynamicDictionary::lookup_best_prefixes_at("いま", now);
+        assert_eq!(candidates[0].text, "14:05");
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.text == "14時5分"));
+    }
+
+    #[test]
+    fn dynamic_date_predictions_are_returned() {
+        let now = NaiveDate::from_ymd_opt(2026, 5, 20)
+            .unwrap()
+            .and_hms_opt(14, 5, 0)
+            .unwrap();
+
+        let candidates = DynamicDictionary::lookup_predictions_at("きょ", now);
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.text == "2026年5月20日"));
     }
 
     #[test]
