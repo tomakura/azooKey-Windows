@@ -1,9 +1,114 @@
 import { Button } from "@/components/ui/button";
-import { RefreshCcw, ExternalLink } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { invoke } from "@tauri-apps/api/core";
+import { BrainCircuit, ExternalLink, Lightbulb, RefreshCcw, WandSparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 
 export const General = () => {
+    const [value, setValue] = useState({
+        learning: true,
+        live_conversion: true,
+        prediction: true,
+    });
+
+    useEffect(() => {
+        invoke<any>("get_config")
+            .then((data) => {
+                setValue({
+                    learning: data.learning?.enable ?? true,
+                    live_conversion: data.conversion?.live_conversion ?? true,
+                    prediction: data.conversion?.prediction ?? true,
+                });
+            })
+            .catch(() => {
+                toast("設定の読み込みに失敗しました");
+            });
+    }, []);
+
+    const updateConfig = async (updater: (config: any) => void) => {
+        try {
+            const data = await invoke<any>("get_config");
+            updater(data);
+            await invoke("update_config", { newConfig: data });
+            return data;
+        } catch {
+            toast("設定の更新に失敗しました");
+            return null;
+        }
+    };
+
+    const handleLearningChange = async (learning: boolean) => {
+        const data = await updateConfig((data) => {
+            data.learning = data.learning ?? {};
+            data.learning.enable = learning;
+        });
+        if (data) {
+            setValue((prev) => ({ ...prev, learning }));
+        }
+    };
+
+    const handleLiveConversionChange = async (live_conversion: boolean) => {
+        const data = await updateConfig((data) => {
+            data.conversion = data.conversion ?? {};
+            data.conversion.live_conversion = live_conversion;
+        });
+        if (data) {
+            setValue((prev) => ({ ...prev, live_conversion }));
+        }
+    };
+
+    const handlePredictionChange = async (prediction: boolean) => {
+        const data = await updateConfig((data) => {
+            data.conversion = data.conversion ?? {};
+            data.conversion.prediction = prediction;
+        });
+        if (data) {
+            setValue((prev) => ({ ...prev, prediction }));
+        }
+    };
+
     return (
         <div className="space-y-8">
+            <section className="space-y-2">
+                <h1 className="text-sm font-bold text-foreground">変換</h1>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <WandSparkles />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            ライブ変換
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            入力中にシステム辞書から候補を表示します
+                        </p>
+                    </div>
+                    <Switch checked={value.live_conversion} onCheckedChange={handleLiveConversionChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Lightbulb />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            予測変換
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            入力途中の読みから候補を先読みします
+                        </p>
+                    </div>
+                    <Switch checked={value.prediction} onCheckedChange={handlePredictionChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <BrainCircuit />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            学習
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            確定した候補を次回以降の変換に反映します
+                        </p>
+                    </div>
+                    <Switch checked={value.learning} onCheckedChange={handleLearningChange} />
+                </div>
+            </section>
             <section className="space-y-2">
                 <h1 className="text-sm font-bold text-foreground">バージョンと更新プログラム</h1>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
