@@ -72,6 +72,7 @@ impl MyAzookeyService {
         };
 
         self.with_converter(|converter| {
+            converter.reload_user_dictionary();
             converter.configure_zenzai(NativeZenzaiConfig {
                 enabled: config.zenzai.enable,
                 model_path,

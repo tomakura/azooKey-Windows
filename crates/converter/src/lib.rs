@@ -102,6 +102,10 @@ impl NativeConverter {
         self.zenzai.reset();
     }
 
+    pub fn reload_user_dictionary(&mut self) {
+        self.user_dictionary = UserDictionary::load(default_user_dictionary_path());
+    }
+
     pub fn append_text(&mut self, input: &str) -> Vec<Candidate> {
         self.raw_input.push_str(input);
         self.refresh_hiragana();

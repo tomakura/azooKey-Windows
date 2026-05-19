@@ -40,6 +40,77 @@ fn update_config(state: tauri::State<AppState>, new_config: AppConfig) {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+struct UserDictionaryEntry {
+    reading: String,
+    text: String,
+}
+
+fn user_dictionary_path() -> Result<PathBuf, String> {
+    let appdata = std::env::var_os("APPDATA").ok_or("APPDATA is not set")?;
+    Ok(PathBuf::from(appdata)
+        .join("Azookey")
+        .join("user_dictionary.tsv"))
+}
+
+#[tauri::command]
+fn get_user_dictionary() -> Result<Vec<UserDictionaryEntry>, String> {
+    let path = user_dictionary_path()?;
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Ok(Vec::new());
+    };
+
+    let entries = content
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.splitn(2, '\t');
+            let reading = fields.next()?.trim();
+            let text = fields.next()?.trim();
+            if reading.is_empty() || text.is_empty() {
+                return None;
+            }
+            Some(UserDictionaryEntry {
+                reading: reading.to_string(),
+                text: text.to_string(),
+            })
+        })
+        .collect();
+
+    Ok(entries)
+}
+
+#[tauri::command]
+fn update_user_dictionary(
+    state: tauri::State<AppState>,
+    entries: Vec<UserDictionaryEntry>,
+) -> Result<(), String> {
+    let path = user_dictionary_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    let content = entries
+        .into_iter()
+        .filter_map(|entry| {
+            let reading = entry.reading.trim().replace(['\t', '\r', '\n'], "");
+            let text = entry.text.trim().replace(['\t', '\r', '\n'], "");
+            if reading.is_empty() || text.is_empty() {
+                return None;
+            }
+            Some(format!("{reading}\t{text}"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(path, content).map_err(|error| error.to_string())?;
+    state
+        .ipc
+        .clone()
+        .update_config()
+        .map_err(|error| error.to_string())?;
+
+    Ok(())
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 struct Capability {
     cpu: bool,
     cuda: bool,
@@ -98,6 +169,8 @@ pub fn run() {
             greet,
             get_config,
             update_config,
+            get_user_dictionary,
+            update_user_dictionary,
             check_capability
         ])
         .run(tauri::generate_context!())
