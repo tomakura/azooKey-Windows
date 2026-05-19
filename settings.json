@@ -14,6 +14,8 @@
     },
     "conversion": {
         "live_conversion": true,
-        "prediction": true
+        "prediction": true,
+        "input_style": "default",
+        "custom_input_table_path": ""
     }
 }

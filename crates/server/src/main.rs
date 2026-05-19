@@ -79,6 +79,17 @@ impl MyAzookeyService {
                 learning_enabled: config.learning.enable,
                 prediction_enabled: config.conversion.prediction,
                 live_conversion_enabled: config.conversion.live_conversion,
+                input_style: config.conversion.input_style,
+                custom_input_table_path: if config
+                    .conversion
+                    .custom_input_table_path
+                    .trim()
+                    .is_empty()
+                {
+                    None
+                } else {
+                    Some(PathBuf::from(config.conversion.custom_input_table_path))
+                },
             });
             converter.configure_zenzai(NativeZenzaiConfig {
                 enabled: config.zenzai.enable,

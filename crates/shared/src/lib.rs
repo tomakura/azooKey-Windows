@@ -67,6 +67,10 @@ pub struct ConversionConfig {
     pub live_conversion: bool,
     #[serde(default = "default_enabled")]
     pub prediction: bool,
+    #[serde(default = "default_input_style")]
+    pub input_style: String,
+    #[serde(default)]
+    pub custom_input_table_path: String,
 }
 
 impl Default for ConversionConfig {
@@ -74,6 +78,8 @@ impl Default for ConversionConfig {
         ConversionConfig {
             live_conversion: default_enabled(),
             prediction: default_enabled(),
+            input_style: default_input_style(),
+            custom_input_table_path: String::new(),
         }
     }
 }
@@ -119,6 +125,10 @@ fn default_zenzai_timeout_ms() -> u64 {
 
 fn default_enabled() -> bool {
     true
+}
+
+fn default_input_style() -> String {
+    "default".to_string()
 }
 
 impl AppConfig {

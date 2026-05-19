@@ -1,7 +1,9 @@
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { invoke } from "@tauri-apps/api/core";
-import { BrainCircuit, ExternalLink, Lightbulb, RefreshCcw, Trash2, WandSparkles } from "lucide-react";
+import { BrainCircuit, ExternalLink, Keyboard, Lightbulb, RefreshCcw, Trash2, WandSparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -10,6 +12,8 @@ export const General = () => {
         learning: true,
         live_conversion: true,
         prediction: true,
+        input_style: "default",
+        custom_input_table_path: "",
     });
 
     useEffect(() => {
@@ -19,6 +23,8 @@ export const General = () => {
                     learning: data.learning?.enable ?? true,
                     live_conversion: data.conversion?.live_conversion ?? true,
                     prediction: data.conversion?.prediction ?? true,
+                    input_style: data.conversion?.input_style ?? "default",
+                    custom_input_table_path: data.conversion?.custom_input_table_path ?? "",
                 });
             })
             .catch(() => {
@@ -68,6 +74,24 @@ export const General = () => {
         }
     };
 
+    const handleInputStyleChange = async (input_style: string) => {
+        const data = await updateConfig((data) => {
+            data.conversion = data.conversion ?? {};
+            data.conversion.input_style = input_style;
+        });
+        if (data) {
+            setValue((prev) => ({ ...prev, input_style }));
+        }
+    };
+
+    const handleCustomInputTablePathChange = async (custom_input_table_path: string) => {
+        setValue((prev) => ({ ...prev, custom_input_table_path }));
+        await updateConfig((data) => {
+            data.conversion = data.conversion ?? {};
+            data.conversion.custom_input_table_path = custom_input_table_path;
+        });
+    };
+
     const handleClearLearning = async () => {
         try {
             await invoke("clear_learning_data");
@@ -104,6 +128,37 @@ export const General = () => {
                         </p>
                     </div>
                     <Switch checked={value.prediction} onCheckedChange={handlePredictionChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Keyboard />
+                    <div className="flex-1 space-y-3">
+                        <div className="space-y-1">
+                            <p className="text-sm font-medium leading-none">
+                                入力テーブル
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                標準ローマ字、AZIK、カスタムTSVを切り替えます
+                            </p>
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row">
+                            <Select value={value.input_style} onValueChange={handleInputStyleChange}>
+                                <SelectTrigger className="w-40">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="default">標準</SelectItem>
+                                    <SelectItem value="azik">AZIK</SelectItem>
+                                    <SelectItem value="custom">カスタム</SelectItem>
+                                </SelectContent>
+                            </Select>
+                            <Input
+                                value={value.custom_input_table_path}
+                                disabled={value.input_style !== "custom"}
+                                placeholder="%APPDATA%\\Azookey\\input_table.tsv"
+                                onChange={(event) => handleCustomInputTablePathChange(event.target.value)}
+                            />
+                        </div>
+                    </div>
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <BrainCircuit />

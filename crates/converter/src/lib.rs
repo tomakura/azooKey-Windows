@@ -41,6 +41,8 @@ pub struct ConversionConfig {
     pub learning_enabled: bool,
     pub prediction_enabled: bool,
     pub live_conversion_enabled: bool,
+    pub input_style: String,
+    pub custom_input_table_path: Option<PathBuf>,
 }
 
 impl Default for ConversionConfig {
@@ -49,7 +51,20 @@ impl Default for ConversionConfig {
             learning_enabled: true,
             prediction_enabled: true,
             live_conversion_enabled: true,
+            input_style: "default".to_string(),
+            custom_input_table_path: None,
         }
+    }
+}
+
+#[derive(Debug)]
+struct InputTable {
+    entries: Vec<(String, String)>,
+}
+
+impl Default for InputTable {
+    fn default() -> Self {
+        Self::standard()
     }
 }
 
@@ -82,6 +97,7 @@ pub struct NativeConverter {
     conversion_config: ConversionConfig,
     zenzai_config: ZenzaiConfig,
     zenzai: ZenzaiEngine,
+    input_table: InputTable,
 }
 
 impl Default for NativeConverter {
@@ -100,6 +116,7 @@ impl Default for NativeConverter {
                 PathBuf::from(DEFAULT_ZENZAI_COMMAND),
             ),
             zenzai: ZenzaiEngine::default(),
+            input_table: InputTable::default(),
         }
     }
 }
@@ -130,7 +147,9 @@ impl NativeConverter {
     }
 
     pub fn configure_conversion(&mut self, config: ConversionConfig) {
+        self.input_table = InputTable::from_config(&config);
         self.conversion_config = config;
+        self.refresh_hiragana();
     }
 
     pub fn reload_user_dictionary(&mut self) {
@@ -218,7 +237,59 @@ impl NativeConverter {
     }
 
     fn refresh_hiragana(&mut self) {
-        self.hiragana = roman_to_hiragana(&self.raw_input);
+        self.hiragana = roman_to_hiragana_with_entries(&self.raw_input, &self.input_table.entries);
+    }
+}
+
+impl InputTable {
+    fn standard() -> Self {
+        Self::from_static(ROMAJI_TABLE)
+    }
+
+    fn azik() -> Self {
+        let mut entries = azik_entries();
+        entries.extend(
+            ROMAJI_TABLE
+                .iter()
+                .map(|(romaji, kana)| ((*romaji).to_string(), (*kana).to_string())),
+        );
+        sort_input_entries(&mut entries);
+        Self { entries }
+    }
+
+    fn custom(path: Option<PathBuf>) -> Self {
+        let mut entries = path
+            .and_then(|path| load_custom_input_table(&path))
+            .unwrap_or_default();
+        entries.extend(
+            ROMAJI_TABLE
+                .iter()
+                .map(|(romaji, kana)| ((*romaji).to_string(), (*kana).to_string())),
+        );
+        sort_input_entries(&mut entries);
+        Self { entries }
+    }
+
+    fn from_config(config: &ConversionConfig) -> Self {
+        match config.input_style.as_str() {
+            "azik" => Self::azik(),
+            "custom" => Self::custom(
+                config
+                    .custom_input_table_path
+                    .clone()
+                    .or_else(default_input_table_path),
+            ),
+            _ => Self::standard(),
+        }
+    }
+
+    fn from_static(entries: &[(&str, &str)]) -> Self {
+        let mut entries = entries
+            .iter()
+            .map(|(romaji, kana)| ((*romaji).to_string(), (*kana).to_string()))
+            .collect::<Vec<_>>();
+        sort_input_entries(&mut entries);
+        Self { entries }
     }
 }
 
@@ -874,6 +945,12 @@ fn default_user_dictionary_path() -> Option<PathBuf> {
         .map(|path| path.join("Azookey").join("user_dictionary.tsv"))
 }
 
+fn default_input_table_path() -> Option<PathBuf> {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .map(|path| path.join("Azookey").join("input_table.tsv"))
+}
+
 fn dedupe_candidates(candidates: Vec<Candidate>) -> Vec<Candidate> {
     let mut seen = HashSet::new();
     candidates
@@ -906,12 +983,27 @@ fn katakana_to_hiragana(value: &str) -> String {
 }
 
 pub fn roman_to_hiragana(input: &str) -> String {
+    roman_to_hiragana_with_entries(input, &InputTable::standard().entries)
+}
+
+fn roman_to_hiragana_with_entries(input: &str, entries: &[(String, String)]) -> String {
     let chars: Vec<char> = input.chars().collect();
     let mut result = String::new();
     let mut index = 0;
 
     while index < chars.len() {
         let ch = chars[index];
+        let remaining: String = chars[index..]
+            .iter()
+            .take(8)
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
+        if let Some((kana, consumed)) = match_input_table(&remaining, entries) {
+            result.push_str(&kana);
+            index += consumed;
+            continue;
+        }
+
         if !ch.is_ascii_alphabetic() {
             result.push(ch);
             index += 1;
@@ -929,17 +1021,6 @@ pub fn roman_to_hiragana(input: &str) -> String {
                 index += 1;
                 continue;
             }
-        }
-
-        let remaining: String = chars[index..]
-            .iter()
-            .take(4)
-            .map(|c| c.to_ascii_lowercase())
-            .collect();
-        if let Some((kana, consumed)) = match_romaji(&remaining) {
-            result.push_str(kana);
-            index += consumed;
-            continue;
         }
 
         if lower == 'n' {
@@ -975,12 +1056,84 @@ fn is_consonant(ch: char) -> bool {
     ch.is_ascii_alphabetic() && !is_vowel(ch)
 }
 
-fn match_romaji(input: &str) -> Option<(&'static str, usize)> {
-    ROMAJI_TABLE
+fn match_input_table(input: &str, entries: &[(String, String)]) -> Option<(String, usize)> {
+    entries
         .iter()
-        .find(|(romaji, _)| input.starts_with(*romaji))
-        .map(|(romaji, kana)| (*kana, romaji.len()))
+        .find(|(romaji, _)| input.starts_with(romaji.as_str()))
+        .map(|(romaji, kana)| (kana.clone(), romaji.len()))
 }
+
+fn sort_input_entries(entries: &mut [(String, String)]) {
+    entries.sort_by(|(left, _), (right, _)| {
+        right.len().cmp(&left.len()).then_with(|| left.cmp(right))
+    });
+}
+
+fn load_custom_input_table(path: &Path) -> Option<Vec<(String, String)>> {
+    let content = fs::read_to_string(path).ok()?;
+    let mut entries = Vec::new();
+    for line in content.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut fields = line.splitn(2, '\t');
+        let Some(romaji) = fields
+            .next()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        let Some(kana) = fields
+            .next()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+        entries.push((romaji.to_ascii_lowercase(), kana.to_string()));
+    }
+    if entries.is_empty() {
+        None
+    } else {
+        Some(entries)
+    }
+}
+
+fn azik_entries() -> Vec<(String, String)> {
+    let mut entries = vec![
+        ("q".to_string(), "ん".to_string()),
+        (";".to_string(), "っ".to_string()),
+        (":".to_string(), "ー".to_string()),
+    ];
+
+    for (stem, a, i, u, e, o) in AZIK_BASE_SYLLABLES {
+        entries.push((format!("{stem}q"), format!("{a}い")));
+        entries.push((format!("{stem}z"), format!("{a}ん")));
+        entries.push((format!("{stem}k"), format!("{i}ん")));
+        entries.push((format!("{stem}j"), format!("{u}ん")));
+        entries.push((format!("{stem}d"), format!("{e}ん")));
+        entries.push((format!("{stem}h"), format!("{o}ん")));
+        entries.push((format!("{stem}p"), format!("{o}う")));
+    }
+
+    entries
+}
+
+const AZIK_BASE_SYLLABLES: &[(&str, &str, &str, &str, &str, &str)] = &[
+    ("k", "か", "き", "く", "け", "こ"),
+    ("g", "が", "ぎ", "ぐ", "げ", "ご"),
+    ("s", "さ", "し", "す", "せ", "そ"),
+    ("z", "ざ", "じ", "ず", "ぜ", "ぞ"),
+    ("t", "た", "ち", "つ", "て", "と"),
+    ("d", "だ", "ぢ", "づ", "で", "ど"),
+    ("n", "な", "に", "ぬ", "ね", "の"),
+    ("h", "は", "ひ", "ふ", "へ", "ほ"),
+    ("b", "ば", "び", "ぶ", "べ", "ぼ"),
+    ("p", "ぱ", "ぴ", "ぷ", "ぺ", "ぽ"),
+    ("m", "ま", "み", "む", "め", "も"),
+    ("r", "ら", "り", "る", "れ", "ろ"),
+];
 
 const ROMAJI_TABLE: &[(&str, &str)] = &[
     ("xtsu", "っ"),
@@ -1153,6 +1306,31 @@ mod tests {
         assert_eq!(roman_to_hiragana("toukyou"), "とうきょう");
         assert_eq!(roman_to_hiragana("gakkou"), "がっこう");
         assert_eq!(roman_to_hiragana("kanji"), "かんじ");
+    }
+
+    #[test]
+    fn converts_azik_input_to_hiragana() {
+        let table = InputTable::azik();
+        assert_eq!(roman_to_hiragana_with_entries("q", &table.entries), "ん");
+        assert_eq!(roman_to_hiragana_with_entries("kz", &table.entries), "かん");
+        assert_eq!(roman_to_hiragana_with_entries("kk", &table.entries), "きん");
+        assert_eq!(roman_to_hiragana_with_entries("kp", &table.entries), "こう");
+        assert_eq!(roman_to_hiragana_with_entries(";", &table.entries), "っ");
+        assert_eq!(roman_to_hiragana_with_entries(":", &table.entries), "ー");
+    }
+
+    #[test]
+    fn loads_custom_input_table_before_standard_entries() {
+        let path =
+            std::env::temp_dir().join(format!("azookey-input-table-{}.tsv", std::process::id()));
+        fs::write(&path, "vv\tゔ\n# comment\nka\tヵ\n").unwrap();
+
+        let table = InputTable::custom(Some(path.clone()));
+        assert_eq!(roman_to_hiragana_with_entries("vv", &table.entries), "ゔ");
+        assert_eq!(roman_to_hiragana_with_entries("ka", &table.entries), "ヵ");
+        assert_eq!(roman_to_hiragana_with_entries("ki", &table.entries), "き");
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]
