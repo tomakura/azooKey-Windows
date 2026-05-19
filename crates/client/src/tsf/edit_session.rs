@@ -14,7 +14,7 @@ use windows::{
 
 use std::{cell::Cell, mem::ManuallyDrop, rc::Rc, time::Instant};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::{engine::state::IMEState, extension::StringExt as _, globals::GUID_DISPLAY_ATTRIBUTE};
 

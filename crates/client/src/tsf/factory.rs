@@ -109,11 +109,11 @@ impl TextServiceFactory {
         unsafe { factory.cast::<I>().map_err(|e| anyhow::Error::new(e)) }
     }
 
-    pub fn borrow_mut(&self) -> Result<RefMut<TextService>> {
+    pub fn borrow_mut(&self) -> Result<RefMut<'_, TextService>> {
         Ok(self.text_service.try_borrow_mut()?)
     }
 
-    pub fn borrow(&self) -> Result<Ref<TextService>> {
+    pub fn borrow(&self) -> Result<Ref<'_, TextService>> {
         Ok(self.text_service.try_borrow()?)
     }
 }
