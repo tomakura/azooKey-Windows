@@ -261,7 +261,10 @@ async fn main() -> anyhow::Result<()> {
                         WindowAction::SetCandidate { candidates } => {
                             let max_len = candidates
                                 .iter()
-                                .map(|s| s.chars().count())
+                                .map(|candidate| {
+                                    candidate.text.chars().count()
+                                        + candidate.subtext.chars().count().min(12)
+                                })
                                 .max()
                                 .unwrap_or(0) as u32;
 

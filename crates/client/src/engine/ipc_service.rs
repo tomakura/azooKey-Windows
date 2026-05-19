@@ -267,8 +267,20 @@ impl IPCService {
     }
 
     #[tracing::instrument]
-    pub fn set_candidates(&mut self, candidates: Vec<String>) -> anyhow::Result<()> {
-        let request = tonic::Request::new(shared::proto::SetCandidateRequest { candidates });
+    pub fn set_candidates(&mut self, candidates: &Candidates) -> anyhow::Result<()> {
+        let candidate_items = candidates
+            .texts
+            .iter()
+            .enumerate()
+            .map(|(index, text)| shared::proto::CandidateItem {
+                text: text.clone(),
+                subtext: candidates.sub_texts.get(index).cloned().unwrap_or_default(),
+            })
+            .collect();
+        let request = tonic::Request::new(shared::proto::SetCandidateRequest {
+            candidates: candidates.texts.clone(),
+            candidate_items,
+        });
         self.runtime
             .clone()
             .block_on(self.window_client.set_candidate(request))?;

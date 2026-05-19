@@ -393,7 +393,7 @@ impl TextServiceFactory {
                     raw_input.clear();
                     raw_hiragana.clear();
                     ipc_service.hide_window()?;
-                    ipc_service.set_candidates(vec![])?;
+                    ipc_service.set_candidates(&Candidates::default())?;
                     ipc_service.clear_text()?;
                 }
                 ClientAction::AppendText(text) => {
@@ -416,7 +416,7 @@ impl TextServiceFactory {
                     raw_hiragana = hiragana.clone();
 
                     self.set_text(&text, &sub_text)?;
-                    ipc_service.set_candidates(candidates.texts.clone())?;
+                    ipc_service.set_candidates(&candidates)?;
                     ipc_service.set_selection(selection_index as i32)?;
                 }
                 ClientAction::RemoveText => {
@@ -448,7 +448,7 @@ impl TextServiceFactory {
                     raw_hiragana = hiragana.clone();
 
                     self.set_text(&text, &sub_text)?;
-                    ipc_service.set_candidates(candidates.texts.clone())?;
+                    ipc_service.set_candidates(&candidates)?;
                     ipc_service.set_selection(selection_index as i32)?;
                 }
                 ClientAction::MoveCursor(_offset) => {
@@ -536,7 +536,7 @@ impl TextServiceFactory {
                     suffix = sub_text.clone();
                     raw_hiragana = hiragana.clone();
 
-                    ipc_service.set_candidates(candidates.texts.clone())?;
+                    ipc_service.set_candidates(&candidates)?;
                     ipc_service.set_selection(selection_index as i32)?;
                     self.update_pos()?;
 

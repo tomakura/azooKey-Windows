@@ -95,6 +95,7 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                         font-size: 0.9rem;
                         display: flex;
                         align-items: center;
+                        gap: 0.5rem;
                         scroll-snap-align: start;
 
                         &::before {
@@ -114,6 +115,21 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                             outline: 1px solid #2CB5FF;
                             outline-offset: -1px;
                         }
+                    }
+                    .candidate-text {
+                        flex: 1;
+                        min-width: 0;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: nowrap;
+                    }
+                    .candidate-subtext {
+                        color: #757575;
+                        font-size: 0.78rem;
+                        min-width: 0;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: nowrap;
                     }
                     footer {
                         display: flex;
@@ -148,6 +164,9 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                                 outline: 1px solid #5C6BC0;
                             }
                         }
+                        .candidate-subtext {
+                            color: #BDBDBD;
+                        }
                             
                         footer {
                             border-top: 1px solid #424242;
@@ -161,11 +180,20 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                         const existingItems = Array.from(candidateList.children);
 
                         candidates.forEach((candidate, index) => {
+                            const item = typeof candidate === 'string' ? { text: candidate, subtext: '' } : candidate;
                             if (existingItems[index]) {
-                                existingItems[index].textContent = candidate;
+                                existingItems[index].querySelector('.candidate-text').textContent = item.text;
+                                existingItems[index].querySelector('.candidate-subtext').textContent = item.subtext || '';
                             } else {
                                 const li = document.createElement('li');
-                                li.textContent = candidate;
+                                const text = document.createElement('span');
+                                text.className = 'candidate-text';
+                                text.textContent = item.text;
+                                const subtext = document.createElement('span');
+                                subtext.className = 'candidate-subtext';
+                                subtext.textContent = item.subtext || '';
+                                li.appendChild(text);
+                                li.appendChild(subtext);
                                 candidateList.appendChild(li);
                             }
                         });

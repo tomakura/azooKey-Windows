@@ -16,6 +16,12 @@ impl WindowController {
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct CandidateView {
+    pub text: String,
+    pub subtext: String,
+}
+
 // ウィンドウ操作コマンド
 #[derive(Debug, serde::Serialize)]
 pub enum WindowAction {
@@ -31,7 +37,7 @@ pub enum WindowAction {
         index: i32,
     },
     SetCandidate {
-        candidates: Vec<String>,
+        candidates: Vec<CandidateView>,
     },
     SetInputMode(String),
 }
@@ -93,13 +99,30 @@ impl WindowServiceProto for WindowService {
         &self,
         request: Request<SetCandidateRequest>,
     ) -> Result<Response<EmptyResponse>, Status> {
-        let candidate = request.into_inner().candidates;
+        let request = request.into_inner();
+        let candidates = if request.candidate_items.is_empty() {
+            request
+                .candidates
+                .into_iter()
+                .map(|text| CandidateView {
+                    text,
+                    subtext: String::new(),
+                })
+                .collect()
+        } else {
+            request
+                .candidate_items
+                .into_iter()
+                .map(|candidate| CandidateView {
+                    text: candidate.text,
+                    subtext: candidate.subtext,
+                })
+                .collect()
+        };
 
         self.controller
             .sender
-            .send(WindowAction::SetCandidate {
-                candidates: candidate,
-            })
+            .send(WindowAction::SetCandidate { candidates })
             .await
             .unwrap();
 

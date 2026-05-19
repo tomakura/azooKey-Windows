@@ -16,8 +16,14 @@ message SetPositionRequest {
 }
 
 // 変換候補を送るメッセージ
+message CandidateItem {
+  string text = 1;
+  string subtext = 2;
+}
+
 message SetCandidateRequest {
   repeated string candidates = 1;
+  repeated CandidateItem candidate_items = 2;
 }
 
 // 変換候補を選択するメッセージ
