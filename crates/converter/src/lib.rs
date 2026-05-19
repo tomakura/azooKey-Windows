@@ -1162,4 +1162,17 @@ mod tests {
 
         let _ = fs::remove_file(path);
     }
+
+    #[test]
+    fn packaged_dictionary_is_loaded() {
+        let resource_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("server-swift")
+            .join("azooKey_dictionary_storage");
+        let mut converter = NativeConverter::load(resource_dir);
+
+        let candidates = converter.append_text("kaku");
+        assert!(candidates.iter().any(|candidate| candidate.text == "書く"));
+    }
 }
