@@ -1,7 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { invoke } from "@tauri-apps/api/core";
-import { BrainCircuit, ExternalLink, Lightbulb, RefreshCcw, WandSparkles } from "lucide-react";
+import { BrainCircuit, ExternalLink, Lightbulb, RefreshCcw, Trash2, WandSparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -68,6 +68,15 @@ export const General = () => {
         }
     };
 
+    const handleClearLearning = async () => {
+        try {
+            await invoke("clear_learning_data");
+            toast("学習データを削除しました");
+        } catch {
+            toast("学習データの削除に失敗しました");
+        }
+    };
+
     return (
         <div className="space-y-8">
             <section className="space-y-2">
@@ -107,6 +116,20 @@ export const General = () => {
                         </p>
                     </div>
                     <Switch checked={value.learning} onCheckedChange={handleLearningChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Trash2 />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            学習データを削除
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            これまで確定した候補の学習結果をリセットします
+                        </p>
+                    </div>
+                    <Button variant="secondary" onClick={handleClearLearning}>
+                        削除
+                    </Button>
                 </div>
             </section>
             <section className="space-y-2">

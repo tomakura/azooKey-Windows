@@ -136,6 +136,10 @@ impl NativeConverter {
         self.user_dictionary = UserDictionary::load(default_user_dictionary_path());
     }
 
+    pub fn reload_learning(&mut self) {
+        self.learning = LearningStore::load(default_learning_path());
+    }
+
     pub fn append_text(&mut self, input: &str) -> Vec<Candidate> {
         self.raw_input.push_str(input);
         self.refresh_hiragana();

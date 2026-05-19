@@ -74,6 +74,7 @@ impl MyAzookeyService {
 
         self.with_converter(|converter| {
             converter.reload_user_dictionary();
+            converter.reload_learning();
             converter.configure_conversion(NativeConversionConfig {
                 learning_enabled: config.learning.enable,
                 prediction_enabled: config.conversion.prediction,

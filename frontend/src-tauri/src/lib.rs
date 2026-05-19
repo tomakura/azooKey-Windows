@@ -52,6 +52,14 @@ fn user_dictionary_path() -> Result<PathBuf, String> {
         .join("user_dictionary.tsv"))
 }
 
+fn learning_data_path() -> Result<PathBuf, String> {
+    let appdata = std::env::var_os("APPDATA").ok_or("APPDATA is not set")?;
+    Ok(PathBuf::from(appdata)
+        .join("Azookey")
+        .join("memory")
+        .join("learning.tsv"))
+}
+
 #[tauri::command]
 fn get_user_dictionary() -> Result<Vec<UserDictionaryEntry>, String> {
     let path = user_dictionary_path()?;
@@ -101,6 +109,21 @@ fn update_user_dictionary(
         .collect::<Vec<_>>()
         .join("\n");
     std::fs::write(path, content).map_err(|error| error.to_string())?;
+    state
+        .ipc
+        .clone()
+        .update_config()
+        .map_err(|error| error.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn clear_learning_data(state: tauri::State<AppState>) -> Result<(), String> {
+    let path = learning_data_path()?;
+    if path.exists() {
+        std::fs::remove_file(path).map_err(|error| error.to_string())?;
+    }
     state
         .ipc
         .clone()
@@ -171,6 +194,7 @@ pub fn run() {
             update_config,
             get_user_dictionary,
             update_user_dictionary,
+            clear_learning_data,
             check_capability
         ])
         .run(tauri::generate_context!())
