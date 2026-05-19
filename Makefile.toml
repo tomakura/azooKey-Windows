@@ -6,15 +6,6 @@ default_to_workspace = false
 command = "cargo"
 args = ["fmt"]
 
-[tasks.build_swift]
-description = "Build the swift code"
-script_runner = "@shell"
-script = """
-cd server-swift
-swift build -c release
-cp .build/release/azookey-server.lib ../
-"""
-
 [tasks.build_x64]
 command = "cargo"
 args = ["build", "${@}"]
@@ -58,13 +49,9 @@ cp target/$str/launcher.exe build
 
 cp target/i686-pc-windows-msvc/$str/azookey_windows.dll build/x86
 
-cp server-swift/.build/x86_64-unknown-windows-msvc/release/azookey-server.dll build
-
 cp -Recurse -Force llama_cpu build
 cp -Recurse -Force llama_cuda build
 cp -Recurse -Force llama_vulkan build
-
-cp $env:APPDATA/../Local/Programs/Swift/Runtimes/*/usr/bin/* build
 
 cp -Recurse -Force server-swift/azooKey_emoji_dictionary_storage/EmojiDictionary build
 cp -Recurse -Force server-swift/azooKey_dictionary_storage/Dictionary build
@@ -81,7 +68,6 @@ clear = true
 description = "Run the flow"
 dependencies = [
     "format",
-    "build_swift",
     "build_x64",
     "build_x86",
     "build_tauri",

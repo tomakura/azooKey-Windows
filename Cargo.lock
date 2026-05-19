@@ -310,10 +310,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "azookey-converter"
+version = "0.1.0"
+
+[[package]]
 name = "azookey-server"
 version = "0.1.0"
 dependencies = [
  "async-stream",
+ "azookey-converter",
  "futures-core",
  "shared",
  "tokio",
