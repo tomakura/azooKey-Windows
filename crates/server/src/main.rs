@@ -11,9 +11,10 @@ use tonic_reflection::server::Builder as ReflectionBuilder;
 
 use shared::proto::azookey_service_server::{AzookeyService, AzookeyServiceServer};
 use shared::proto::{
-    AppendTextRequest, AppendTextResponse, ClearTextRequest, ClearTextResponse, ComposingText,
-    MoveCursorRequest, MoveCursorResponse, RemoveTextRequest, RemoveTextResponse,
-    ShrinkTextRequest, ShrinkTextResponse, Suggestion,
+    AppendTextRequest, AppendTextResponse, ClearTextRequest, ClearTextResponse,
+    CommitCandidateRequest, CommitCandidateResponse, ComposingText, MoveCursorRequest,
+    MoveCursorResponse, RemoveTextRequest, RemoveTextResponse, ShrinkTextRequest,
+    ShrinkTextResponse, Suggestion,
 };
 
 fn response_from_parts(hiragana: String, candidates: Vec<NativeCandidate>) -> ComposingText {
@@ -171,6 +172,15 @@ impl AzookeyService for MyAzookeyService {
     ) -> Result<Response<shared::proto::UpdateConfigResponse>, Status> {
         self.apply_config()?;
         Ok(Response::new(shared::proto::UpdateConfigResponse {}))
+    }
+
+    async fn commit_candidate(
+        &self,
+        request: Request<CommitCandidateRequest>,
+    ) -> Result<Response<CommitCandidateResponse>, Status> {
+        let request = request.into_inner();
+        self.with_converter(|converter| converter.record_commit(&request.reading, &request.text))?;
+        Ok(Response::new(CommitCandidateResponse {}))
     }
 }
 

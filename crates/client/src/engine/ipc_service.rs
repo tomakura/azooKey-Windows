@@ -209,6 +209,16 @@ impl IPCService {
 
         Ok(())
     }
+
+    pub fn commit_candidate(&mut self, reading: String, text: String) -> anyhow::Result<()> {
+        let request = tonic::Request::new(shared::proto::CommitCandidateRequest { reading, text });
+        let _response = self
+            .runtime
+            .clone()
+            .block_on(self.azookey_client.commit_candidate(request))?;
+
+        Ok(())
+    }
 }
 
 // implement methods to interact with candidate window server

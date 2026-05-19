@@ -141,11 +141,17 @@ impl TextServiceFactory {
                 }
                 UserAction::Enter => {
                     if composition.suffix.is_empty() {
-                        (CompositionState::None, vec![ClientAction::EndComposition])
+                        (
+                            CompositionState::None,
+                            vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
+                        )
                     } else {
                         (
                             CompositionState::Composing,
-                            vec![ClientAction::ShrinkText("".to_string())],
+                            vec![
+                                ClientAction::CommitCandidate,
+                                ClientAction::ShrinkText("".to_string()),
+                            ],
                         )
                     }
                 }
@@ -211,11 +217,17 @@ impl TextServiceFactory {
             CompositionState::Previewing => match action {
                 UserAction::Input(char) => (
                     CompositionState::Composing,
-                    vec![ClientAction::ShrinkText(char.to_string())],
+                    vec![
+                        ClientAction::CommitCandidate,
+                        ClientAction::ShrinkText(char.to_string()),
+                    ],
                 ),
                 UserAction::Number(number) => (
                     CompositionState::Composing,
-                    vec![ClientAction::ShrinkText(number.to_string())],
+                    vec![
+                        ClientAction::CommitCandidate,
+                        ClientAction::ShrinkText(number.to_string()),
+                    ],
                 ),
                 UserAction::Backspace => {
                     if composition.preview.chars().count() == 1 {
@@ -229,11 +241,17 @@ impl TextServiceFactory {
                 }
                 UserAction::Enter => {
                     if composition.suffix.is_empty() {
-                        (CompositionState::None, vec![ClientAction::EndComposition])
+                        (
+                            CompositionState::None,
+                            vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
+                        )
                     } else {
                         (
                             CompositionState::Composing,
-                            vec![ClientAction::ShrinkText("".to_string())],
+                            vec![
+                                ClientAction::CommitCandidate,
+                                ClientAction::ShrinkText("".to_string()),
+                            ],
                         )
                     }
                 }
@@ -356,6 +374,15 @@ impl TextServiceFactory {
                     self.start_composition()?;
                     self.update_pos()?;
                     ipc_service.show_window()?;
+                }
+                ClientAction::CommitCandidate => {
+                    let reading = raw_hiragana
+                        .chars()
+                        .take(corresponding_count.max(0) as usize)
+                        .collect::<String>();
+                    if !reading.is_empty() && !preview.is_empty() {
+                        ipc_service.commit_candidate(reading, preview.clone())?;
+                    }
                 }
                 ClientAction::EndComposition => {
                     self.end_composition()?;

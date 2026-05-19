@@ -52,6 +52,7 @@ struct Dictionary {
 
 pub struct NativeConverter {
     dictionary: Dictionary,
+    learning: LearningStore,
     raw_input: String,
     hiragana: String,
     context: String,
@@ -63,6 +64,7 @@ impl Default for NativeConverter {
     fn default() -> Self {
         Self {
             dictionary: Dictionary::default(),
+            learning: LearningStore::load(default_learning_path()),
             raw_input: String::new(),
             hiragana: String::new(),
             context: String::new(),
@@ -78,12 +80,14 @@ impl Default for NativeConverter {
 impl NativeConverter {
     pub fn load(resource_dir: impl AsRef<Path>) -> Self {
         let dictionary = Dictionary::load(resource_dir.as_ref().join("Dictionary"));
+        let learning = LearningStore::load(default_learning_path());
         let zenzai_config = ZenzaiConfig::disabled(
             resource_dir.as_ref().join(DEFAULT_ZENZAI_MODEL),
             resource_dir.as_ref().join(DEFAULT_ZENZAI_COMMAND),
         );
         Self {
             dictionary,
+            learning,
             zenzai_config,
             ..Default::default()
         }
@@ -122,6 +126,10 @@ impl NativeConverter {
         self.context = context.into();
     }
 
+    pub fn record_commit(&mut self, reading: &str, text: &str) {
+        self.learning.record_commit(reading, text);
+    }
+
     pub fn hiragana(&self) -> &str {
         &self.hiragana
     }
@@ -131,7 +139,8 @@ impl NativeConverter {
             return Vec::new();
         }
 
-        let mut candidates = self.dictionary.lookup_best_prefixes(&self.hiragana);
+        let mut candidates = self.learning.lookup_best_prefixes(&self.hiragana);
+        candidates.extend(self.dictionary.lookup_best_prefixes(&self.hiragana));
         candidates.push(Candidate {
             text: self.hiragana.clone(),
             subtext: String::new(),
@@ -309,6 +318,132 @@ impl Dictionary {
 
         candidates
     }
+}
+
+#[derive(Debug, Default)]
+struct LearningStore {
+    path: Option<PathBuf>,
+    counts: HashMap<(String, String), u32>,
+}
+
+impl LearningStore {
+    fn load(path: Option<PathBuf>) -> Self {
+        let mut store = Self {
+            path,
+            counts: HashMap::new(),
+        };
+        let Some(path) = &store.path else {
+            return store;
+        };
+        let Ok(content) = fs::read_to_string(path) else {
+            return store;
+        };
+
+        for line in content.lines() {
+            let mut fields = line.splitn(3, '\t');
+            let Some(reading) = fields.next() else {
+                continue;
+            };
+            let Some(text) = fields.next() else {
+                continue;
+            };
+            let count = fields
+                .next()
+                .and_then(|value| value.parse::<u32>().ok())
+                .unwrap_or(1);
+            if !reading.is_empty() && !text.is_empty() {
+                store
+                    .counts
+                    .insert((reading.to_string(), text.to_string()), count.max(1));
+            }
+        }
+
+        store
+    }
+
+    fn record_commit(&mut self, reading: &str, text: &str) {
+        let reading = reading.trim();
+        let text = text.trim();
+        if reading.is_empty() || text.is_empty() || reading == text {
+            return;
+        }
+
+        *self
+            .counts
+            .entry((reading.to_string(), text.to_string()))
+            .or_insert(0) += 1;
+        let _ = self.persist();
+    }
+
+    fn lookup_best_prefixes(&self, hiragana: &str) -> Vec<Candidate> {
+        let length = hiragana.chars().count();
+        let mut candidates = Vec::new();
+
+        for prefix_len in (1..=length).rev() {
+            let prefix = take_chars(hiragana, prefix_len);
+            let subtext = skip_chars(hiragana, prefix_len);
+            let mut entries = self
+                .counts
+                .iter()
+                .filter_map(|((reading, text), count)| {
+                    if reading == &prefix {
+                        Some((text, count))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            entries.sort_by(|(left_text, left_count), (right_text, right_count)| {
+                right_count
+                    .cmp(left_count)
+                    .then_with(|| left_text.cmp(right_text))
+            });
+
+            for (text, _) in entries {
+                candidates.push(Candidate {
+                    text: text.clone(),
+                    subtext: subtext.clone(),
+                    corresponding_count: prefix_len as i32,
+                });
+                if candidates.len() >= MAX_RETURNED_CANDIDATES {
+                    return candidates;
+                }
+            }
+        }
+
+        candidates
+    }
+
+    fn persist(&self) -> std::io::Result<()> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut rows = self.counts.iter().collect::<Vec<_>>();
+        rows.sort_by(
+            |((left_reading, left_text), _), ((right_reading, right_text), _)| {
+                left_reading
+                    .cmp(right_reading)
+                    .then_with(|| left_text.cmp(right_text))
+            },
+        );
+        let content = rows
+            .into_iter()
+            .map(|((reading, text), count)| format!("{reading}\t{text}\t{count}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        fs::write(path, content)
+    }
+}
+
+fn default_learning_path() -> Option<PathBuf> {
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .map(|path| path.join("Azookey").join("memory").join("learning.tsv"))
 }
 
 fn dedupe_candidates(candidates: Vec<Candidate>) -> Vec<Candidate> {
@@ -598,5 +733,32 @@ mod tests {
         let candidates = converter.append_text("kanji");
         assert_eq!(converter.hiragana(), "かんじ");
         assert_eq!(candidates[0].text, "かんじ");
+    }
+
+    #[test]
+    fn learned_candidate_is_ranked_first() {
+        let path =
+            std::env::temp_dir().join(format!("azookey-learning-{}.tsv", std::process::id()));
+        let _ = fs::remove_file(&path);
+
+        let mut converter = NativeConverter {
+            learning: LearningStore::load(Some(path.clone())),
+            ..Default::default()
+        };
+        converter.record_commit("かんじ", "漢字");
+
+        let candidates = converter.append_text("kanji");
+        assert_eq!(candidates[0].text, "漢字");
+        assert_eq!(candidates[0].corresponding_count, 3);
+
+        let reloaded = LearningStore::load(Some(path.clone()));
+        assert_eq!(
+            reloaded
+                .counts
+                .get(&("かんじ".to_string(), "漢字".to_string())),
+            Some(&1)
+        );
+
+        let _ = fs::remove_file(path);
     }
 }
