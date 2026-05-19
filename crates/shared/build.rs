@@ -1,6 +1,12 @@
 use std::{env, path::PathBuf};
 
 fn main() {
+    if env::var_os("PROTOC").is_none() {
+        let protoc =
+            protoc_bin_vendored::protoc_bin_path().expect("failed to find vendored protoc binary");
+        env::set_var("PROTOC", protoc);
+    }
+
     let project_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let out_dir = env::var("OUT_DIR").unwrap();
 
