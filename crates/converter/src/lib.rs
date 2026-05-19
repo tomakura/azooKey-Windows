@@ -33,6 +33,23 @@ pub struct ZenzaiConfig {
     pub inference_limit: usize,
 }
 
+#[derive(Clone, Debug)]
+pub struct ConversionConfig {
+    pub learning_enabled: bool,
+    pub prediction_enabled: bool,
+    pub live_conversion_enabled: bool,
+}
+
+impl Default for ConversionConfig {
+    fn default() -> Self {
+        Self {
+            learning_enabled: true,
+            prediction_enabled: true,
+            live_conversion_enabled: true,
+        }
+    }
+}
+
 impl ZenzaiConfig {
     pub fn disabled(model_path: PathBuf, command_path: PathBuf) -> Self {
         Self {
@@ -57,6 +74,7 @@ pub struct NativeConverter {
     raw_input: String,
     hiragana: String,
     context: String,
+    conversion_config: ConversionConfig,
     zenzai_config: ZenzaiConfig,
     zenzai: ZenzaiEngine,
 }
@@ -70,6 +88,7 @@ impl Default for NativeConverter {
             raw_input: String::new(),
             hiragana: String::new(),
             context: String::new(),
+            conversion_config: ConversionConfig::default(),
             zenzai_config: ZenzaiConfig::disabled(
                 PathBuf::from(DEFAULT_ZENZAI_MODEL),
                 PathBuf::from(DEFAULT_ZENZAI_COMMAND),
@@ -100,6 +119,10 @@ impl NativeConverter {
     pub fn configure_zenzai(&mut self, config: ZenzaiConfig) {
         self.zenzai_config = config;
         self.zenzai.reset();
+    }
+
+    pub fn configure_conversion(&mut self, config: ConversionConfig) {
+        self.conversion_config = config;
     }
 
     pub fn reload_user_dictionary(&mut self) {
@@ -135,6 +158,9 @@ impl NativeConverter {
     }
 
     pub fn record_commit(&mut self, reading: &str, text: &str) {
+        if !self.conversion_config.learning_enabled {
+            return;
+        }
         self.learning.record_commit(reading, text);
     }
 
@@ -148,8 +174,19 @@ impl NativeConverter {
         }
 
         let mut candidates = self.user_dictionary.lookup_best_prefixes(&self.hiragana);
-        candidates.extend(self.learning.lookup_best_prefixes(&self.hiragana));
-        candidates.extend(self.dictionary.lookup_best_prefixes(&self.hiragana));
+        if self.conversion_config.learning_enabled {
+            candidates.extend(self.learning.lookup_best_prefixes(&self.hiragana));
+        }
+        if self.conversion_config.live_conversion_enabled {
+            candidates.extend(self.dictionary.lookup_best_prefixes(&self.hiragana));
+        }
+        if self.conversion_config.prediction_enabled {
+            candidates.extend(self.user_dictionary.lookup_predictions(&self.hiragana));
+            if self.conversion_config.learning_enabled {
+                candidates.extend(self.learning.lookup_predictions(&self.hiragana));
+            }
+            candidates.extend(self.dictionary.lookup_predictions(&self.hiragana));
+        }
         candidates.push(Candidate {
             text: self.hiragana.clone(),
             subtext: String::new(),
@@ -327,6 +364,33 @@ impl Dictionary {
 
         candidates
     }
+
+    fn lookup_predictions(&self, hiragana: &str) -> Vec<Candidate> {
+        let length = hiragana.chars().count();
+        let mut entries = self
+            .entries
+            .iter()
+            .filter(|(reading, _)| reading.starts_with(hiragana) && reading.as_str() != hiragana)
+            .flat_map(|(_, entries)| entries.iter())
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.text.cmp(&right.text))
+        });
+
+        entries
+            .into_iter()
+            .map(|entry| Candidate {
+                text: entry.text.clone(),
+                subtext: String::new(),
+                corresponding_count: length as i32,
+            })
+            .take(MAX_RETURNED_CANDIDATES)
+            .collect()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -387,6 +451,21 @@ impl UserDictionary {
         }
 
         candidates
+    }
+
+    fn lookup_predictions(&self, hiragana: &str) -> Vec<Candidate> {
+        let length = hiragana.chars().count();
+        self.entries
+            .iter()
+            .filter(|(reading, _)| reading.starts_with(hiragana) && reading.as_str() != hiragana)
+            .flat_map(|(_, entries)| entries.iter())
+            .map(|text| Candidate {
+                text: text.clone(),
+                subtext: String::new(),
+                corresponding_count: length as i32,
+            })
+            .take(MAX_RETURNED_CANDIDATES)
+            .collect()
     }
 }
 
@@ -482,6 +561,36 @@ impl LearningStore {
         }
 
         candidates
+    }
+
+    fn lookup_predictions(&self, hiragana: &str) -> Vec<Candidate> {
+        let length = hiragana.chars().count();
+        let mut entries = self
+            .counts
+            .iter()
+            .filter_map(|((reading, text), count)| {
+                if reading.starts_with(hiragana) && reading != hiragana {
+                    Some((text, count))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        entries.sort_by(|(left_text, left_count), (right_text, right_count)| {
+            right_count
+                .cmp(left_count)
+                .then_with(|| left_text.cmp(right_text))
+        });
+
+        entries
+            .into_iter()
+            .map(|(text, _)| Candidate {
+                text: text.clone(),
+                subtext: String::new(),
+                corresponding_count: length as i32,
+            })
+            .take(MAX_RETURNED_CANDIDATES)
+            .collect()
     }
 
     fn persist(&self) -> std::io::Result<()> {
@@ -860,5 +969,46 @@ mod tests {
             .any(|candidate| candidate.text == "学習漢字"));
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn prediction_can_be_disabled() {
+        let path = std::env::temp_dir().join(format!(
+            "azookey-user-dictionary-prediction-{}.tsv",
+            std::process::id()
+        ));
+        fs::write(&path, "かんじ\t漢字").unwrap();
+
+        let mut converter = NativeConverter {
+            user_dictionary: UserDictionary::load(Some(path.clone())),
+            ..Default::default()
+        };
+        converter.append_text("kan");
+        assert!(converter
+            .candidates()
+            .iter()
+            .any(|candidate| candidate.text == "漢字"));
+
+        converter.configure_conversion(ConversionConfig {
+            prediction_enabled: false,
+            ..Default::default()
+        });
+        let candidates = converter.candidates();
+        assert!(!candidates.iter().any(|candidate| candidate.text == "漢字"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn learning_can_be_disabled() {
+        let mut converter = NativeConverter::default();
+        converter.configure_conversion(ConversionConfig {
+            learning_enabled: false,
+            ..Default::default()
+        });
+        converter.record_commit("かんじ", "漢字");
+
+        let candidates = converter.append_text("kanji");
+        assert!(!candidates.iter().any(|candidate| candidate.text == "漢字"));
     }
 }

@@ -7,5 +7,12 @@
         "inference_limit": 1,
         "model_path": "",
         "command_path": ""
+    },
+    "learning": {
+        "enable": true
+    },
+    "conversion": {
+        "live_conversion": true,
+        "prediction": true
     }
 }

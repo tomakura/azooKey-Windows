@@ -1,5 +1,6 @@
 use azookey_converter::{
-    Candidate as NativeCandidate, NativeConverter, ZenzaiConfig as NativeZenzaiConfig,
+    Candidate as NativeCandidate, ConversionConfig as NativeConversionConfig, NativeConverter,
+    ZenzaiConfig as NativeZenzaiConfig,
 };
 use azookey_server::TonicNamedPipeServer;
 use std::{
@@ -73,6 +74,11 @@ impl MyAzookeyService {
 
         self.with_converter(|converter| {
             converter.reload_user_dictionary();
+            converter.configure_conversion(NativeConversionConfig {
+                learning_enabled: config.learning.enable,
+                prediction_enabled: config.conversion.prediction,
+                live_conversion_enabled: config.conversion.live_conversion,
+            });
             converter.configure_zenzai(NativeZenzaiConfig {
                 enabled: config.zenzai.enable,
                 model_path,

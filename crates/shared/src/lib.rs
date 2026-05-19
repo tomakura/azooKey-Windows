@@ -17,8 +17,11 @@ const SETTINGS_FILENAME: &str = "settings.json";
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ZenzaiConfig {
+    #[serde(default)]
     pub enable: bool,
+    #[serde(default)]
     pub profile: String,
+    #[serde(default = "default_zenzai_backend")]
     pub backend: String,
     #[serde(default = "default_zenzai_inference_limit")]
     pub inference_limit: usize,
@@ -28,30 +31,87 @@ pub struct ZenzaiConfig {
     pub command_path: String,
 }
 
+impl Default for ZenzaiConfig {
+    fn default() -> Self {
+        ZenzaiConfig {
+            enable: false,
+            profile: "".to_string(),
+            backend: default_zenzai_backend(),
+            inference_limit: default_zenzai_inference_limit(),
+            model_path: "".to_string(),
+            command_path: "".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct LearningConfig {
+    #[serde(default = "default_enabled")]
+    pub enable: bool,
+}
+
+impl Default for LearningConfig {
+    fn default() -> Self {
+        LearningConfig {
+            enable: default_enabled(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ConversionConfig {
+    #[serde(default = "default_enabled")]
+    pub live_conversion: bool,
+    #[serde(default = "default_enabled")]
+    pub prediction: bool,
+}
+
+impl Default for ConversionConfig {
+    fn default() -> Self {
+        ConversionConfig {
+            live_conversion: default_enabled(),
+            prediction: default_enabled(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AppConfig {
+    #[serde(default = "default_version")]
     pub version: String,
+    #[serde(default)]
     pub zenzai: ZenzaiConfig,
+    #[serde(default)]
+    pub learning: LearningConfig,
+    #[serde(default)]
+    pub conversion: ConversionConfig,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         AppConfig {
-            version: "0.1.0".to_string(),
-            zenzai: ZenzaiConfig {
-                enable: false,
-                profile: "".to_string(),
-                backend: "cpu".to_string(),
-                inference_limit: default_zenzai_inference_limit(),
-                model_path: "".to_string(),
-                command_path: "".to_string(),
-            },
+            version: default_version(),
+            zenzai: ZenzaiConfig::default(),
+            learning: LearningConfig::default(),
+            conversion: ConversionConfig::default(),
         }
     }
 }
 
+fn default_version() -> String {
+    "0.1.0".to_string()
+}
+
+fn default_zenzai_backend() -> String {
+    "cpu".to_string()
+}
+
 fn default_zenzai_inference_limit() -> usize {
     1
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 impl AppConfig {
