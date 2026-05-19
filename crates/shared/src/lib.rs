@@ -29,6 +29,8 @@ pub struct ZenzaiConfig {
     pub model_path: String,
     #[serde(default)]
     pub command_path: String,
+    #[serde(default = "default_zenzai_timeout_ms")]
+    pub timeout_ms: u64,
 }
 
 impl Default for ZenzaiConfig {
@@ -40,6 +42,7 @@ impl Default for ZenzaiConfig {
             inference_limit: default_zenzai_inference_limit(),
             model_path: "".to_string(),
             command_path: "".to_string(),
+            timeout_ms: default_zenzai_timeout_ms(),
         }
     }
 }
@@ -108,6 +111,10 @@ fn default_zenzai_backend() -> String {
 
 fn default_zenzai_inference_limit() -> usize {
     1
+}
+
+fn default_zenzai_timeout_ms() -> u64 {
+    1500
 }
 
 fn default_enabled() -> bool {

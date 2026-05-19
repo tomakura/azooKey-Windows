@@ -6,7 +6,8 @@
         "backend": "cpu",
         "inference_limit": 1,
         "model_path": "",
-        "command_path": ""
+        "command_path": "",
+        "timeout_ms": 1500
     },
     "learning": {
         "enable": true

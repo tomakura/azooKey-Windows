@@ -52,6 +52,7 @@ export const Zenzai = () => {
         profile: "",
         backend: "",
         inference_limit: 1,
+        timeout_ms: 1500,
         model_path: "",
         command_path: "",
     });
@@ -72,6 +73,7 @@ export const Zenzai = () => {
                     profile: zenzai.profile,
                     backend: zenzai.backend,
                     inference_limit: zenzai.inference_limit ?? 1,
+                    timeout_ms: zenzai.timeout_ms ?? 1500,
                     model_path: zenzai.model_path ?? "",
                     command_path: zenzai.command_path ?? "",
                 });
@@ -161,6 +163,15 @@ export const Zenzai = () => {
         });
     };
 
+    const handleTimeoutChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const timeout_ms = Math.max(100, Number(event.target.value) || 1500);
+        setValue((prev) => ({ ...prev, timeout_ms }));
+
+        updateConfig((data) => {
+            data.zenzai.timeout_ms = timeout_ms;
+        });
+    };
+
     return (
         <div className="space-y-8">
             <section className="space-y-2">
@@ -230,6 +241,18 @@ export const Zenzai = () => {
                         </p>
                     </div>
                     <Input className="w-24" type="number" min={1} max={8} value={value.inference_limit} disabled={!value.enable} onChange={handleInferenceLimitChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Gauge />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            タイムアウト
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            Zenzaiの応答を待つ最大時間
+                        </p>
+                    </div>
+                    <Input className="w-28" type="number" min={100} step={100} value={value.timeout_ms} disabled={!value.enable} onChange={handleTimeoutChange} />
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <Cpu />

@@ -1,9 +1,10 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, Read},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
+    time::{Duration, Instant},
 };
 
 const MAX_DICTIONARY_CANDIDATES_PER_KEY: usize = 32;
@@ -31,6 +32,7 @@ pub struct ZenzaiConfig {
     pub command_path: PathBuf,
     pub profile: String,
     pub inference_limit: usize,
+    pub timeout_ms: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +60,7 @@ impl ZenzaiConfig {
             command_path,
             profile: String::new(),
             inference_limit: 1,
+            timeout_ms: 1500,
         }
     }
 }
@@ -238,26 +241,9 @@ impl ZenzaiEngine {
             context, config.profile, hiragana, numbered
         );
 
-        let limit = config.inference_limit.max(1);
-        let Ok(output) = Command::new(&config.command_path)
-            .arg("-m")
-            .arg(&config.model_path)
-            .arg("-n")
-            .arg(limit.to_string())
-            .arg("--temp")
-            .arg("0")
-            .arg("--no-display-prompt")
-            .arg("-p")
-            .arg(prompt)
-            .output()
-        else {
+        let Some(output) = run_zenzai_command(config, prompt) else {
             return candidates;
         };
-        if !output.status.success() {
-            return candidates;
-        }
-
-        let output = String::from_utf8_lossy(&output.stdout);
 
         let Some(index) = output
             .chars()
@@ -270,6 +256,46 @@ impl ZenzaiEngine {
         };
 
         promote_candidate(candidates, index)
+    }
+}
+
+fn run_zenzai_command(config: &ZenzaiConfig, prompt: String) -> Option<String> {
+    let limit = config.inference_limit.max(1);
+    let mut child = Command::new(&config.command_path)
+        .arg("-m")
+        .arg(&config.model_path)
+        .arg("-n")
+        .arg(limit.to_string())
+        .arg("--temp")
+        .arg("0")
+        .arg("--no-display-prompt")
+        .arg("-p")
+        .arg(prompt)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    let started_at = Instant::now();
+    let timeout = Duration::from_millis(config.timeout_ms.max(100));
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return None;
+                }
+                let mut output = String::new();
+                child.stdout.take()?.read_to_string(&mut output).ok()?;
+                return Some(output);
+            }
+            Ok(None) if started_at.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(_) => return None,
+        }
     }
 }
 

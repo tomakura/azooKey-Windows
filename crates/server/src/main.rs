@@ -85,6 +85,7 @@ impl MyAzookeyService {
                 command_path,
                 profile: config.zenzai.profile,
                 inference_limit: config.zenzai.inference_limit,
+                timeout_ms: config.zenzai.timeout_ms,
             });
         })
     }
