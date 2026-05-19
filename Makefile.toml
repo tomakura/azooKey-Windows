@@ -49,14 +49,14 @@ cp target/$str/launcher.exe build
 
 cp target/i686-pc-windows-msvc/$str/azookey_windows.dll build/x86
 
-cp -Recurse -Force llama_cpu build
-cp -Recurse -Force llama_cuda build
-cp -Recurse -Force llama_vulkan build
+if (Test-Path llama_cpu) { cp -Recurse -Force llama_cpu build }
+if (Test-Path llama_cuda) { cp -Recurse -Force llama_cuda build }
+if (Test-Path llama_vulkan) { cp -Recurse -Force llama_vulkan build }
 
 cp -Recurse -Force server-swift/azooKey_emoji_dictionary_storage/EmojiDictionary build
 cp -Recurse -Force server-swift/azooKey_dictionary_storage/Dictionary build
 
-cp zenz.gguf build
+if (Test-Path zenz.gguf) { cp zenz.gguf build }
 
 icacls build/azookey_windows.dll /grant "*S-1-15-2-1:(RX)"
 icacls build/x86/azookey_windows.dll /grant "*S-1-15-2-1:(RX)"

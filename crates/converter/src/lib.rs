@@ -222,11 +222,7 @@ impl ZenzaiEngine {
         hiragana: &str,
         candidates: Vec<Candidate>,
     ) -> Vec<Candidate> {
-        if !config.enabled
-            || candidates.len() <= 1
-            || !config.model_path.exists()
-            || !config.command_path.exists()
-        {
+        if !config.enabled || candidates.len() <= 1 || !config.model_path.exists() {
             return candidates;
         }
 

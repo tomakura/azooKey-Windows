@@ -67,7 +67,7 @@ impl MyAzookeyService {
             PathBuf::from(&config.zenzai.model_path)
         };
         let command_path = if config.zenzai.command_path.trim().is_empty() {
-            self.resource_dir.join("llama-cli.exe")
+            PathBuf::from("llama-cli.exe")
         } else {
             PathBuf::from(&config.zenzai.command_path)
         };

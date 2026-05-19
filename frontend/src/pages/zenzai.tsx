@@ -224,7 +224,7 @@ export const Zenzai = () => {
                                 llama.cpp CLI
                             </p>
                             <p className="text-xs text-muted-foreground">
-                                空欄の場合はIMEサーバーと同じフォルダーのllama-cli.exeを使用します
+                                空欄の場合は選択中のバックエンドからPATH経由でllama-cli.exeを使用します
                             </p>
                         </div>
                     </div>
