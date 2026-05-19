@@ -15,7 +15,7 @@ command = "cargo"
 args = ["build", "-p", "azookey-windows", "--target=i686-pc-windows-msvc", "${@}"]
 
 [tasks.build_tauri]
-description = "Build the swift code"
+description = "Build the settings UI"
 script_runner = "@shell"
 script = """
 cd frontend
@@ -57,11 +57,17 @@ cp -Recurse -Force server-swift/azooKey_emoji_dictionary_storage/EmojiDictionary
 cp -Recurse -Force server-swift/azooKey_dictionary_storage/Dictionary build
 
 if (Test-Path zenz.gguf) { cp zenz.gguf build }
+"""
+args = ["${@}"]
 
+[tasks.grant_appcontainer_permissions]
+description = "Grant AppContainer read and execute permissions to built IME DLLs"
+script_runner = "powershell"
+script_extension = "ps1"
+script = """
 icacls build/azookey_windows.dll /grant "*S-1-15-2-1:(RX)"
 icacls build/x86/azookey_windows.dll /grant "*S-1-15-2-1:(RX)"
 """
-args = ["${@}"]
 
 [tasks.build]
 clear = true
