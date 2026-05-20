@@ -27,6 +27,12 @@ struct DictionaryEntry {
 }
 
 #[derive(Clone, Debug)]
+struct CompoundCandidate {
+    text: String,
+    score: f32,
+}
+
+#[derive(Clone, Debug)]
 pub struct ZenzaiConfig {
     pub enabled: bool,
     pub model_path: PathBuf,
@@ -243,6 +249,7 @@ impl NativeConverter {
             candidates.extend(self.learning.lookup_best_prefixes(&self.hiragana));
         }
         if self.conversion_config.live_conversion_enabled {
+            candidates.extend(self.dictionary.lookup_compound_candidates(&self.hiragana));
             let dictionary_candidates = self.dictionary.lookup_best_prefixes(&self.hiragana);
             let has_full_dictionary_match = dictionary_candidates.iter().any(|candidate| {
                 candidate.corresponding_count as usize == self.hiragana.chars().count()
@@ -679,6 +686,84 @@ impl Dictionary {
         candidates
     }
 
+    fn lookup_compound_candidates(&self, hiragana: &str) -> Vec<Candidate> {
+        let length = hiragana.chars().count();
+        if !(2..=16).contains(&length) {
+            return Vec::new();
+        }
+
+        let mut memo = HashMap::new();
+        let mut compounds = self.compound_candidates_from(hiragana, 0, length, &mut memo);
+        compounds.sort_by(|left, right| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.text.cmp(&right.text))
+        });
+        compounds
+            .into_iter()
+            .map(|candidate| Candidate {
+                text: candidate.text,
+                subtext: String::new(),
+                corresponding_count: length as i32,
+            })
+            .take(MAX_RETURNED_CANDIDATES)
+            .collect()
+    }
+
+    fn compound_candidates_from(
+        &self,
+        hiragana: &str,
+        start: usize,
+        length: usize,
+        memo: &mut HashMap<usize, Vec<CompoundCandidate>>,
+    ) -> Vec<CompoundCandidate> {
+        if start == length {
+            return vec![CompoundCandidate {
+                text: String::new(),
+                score: 0.0,
+            }];
+        }
+        if let Some(candidates) = memo.get(&start) {
+            return candidates.clone();
+        }
+
+        let mut candidates = Vec::new();
+        for end in ((start + 1)..=length).rev() {
+            let key = slice_chars(hiragana, start, end);
+            let Some(entries) = self.entries.get(&key) else {
+                continue;
+            };
+            let tails = self.compound_candidates_from(hiragana, end, length, memo);
+            if tails.is_empty() {
+                continue;
+            }
+
+            for entry in entries.iter().take(3) {
+                for tail in tails.iter().take(3) {
+                    let mut text = entry.text.clone();
+                    text.push_str(&tail.text);
+                    candidates.push(CompoundCandidate {
+                        text,
+                        score: entry.score + tail.score,
+                    });
+                }
+            }
+        }
+
+        candidates.sort_by(|left, right| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.text.cmp(&right.text))
+        });
+        candidates.truncate(MAX_RETURNED_CANDIDATES);
+        memo.insert(start, candidates.clone());
+        candidates
+    }
+
     fn lookup_predictions(&self, hiragana: &str) -> Vec<Candidate> {
         let length = hiragana.chars().count();
         let mut entries = self
@@ -1100,6 +1185,10 @@ fn take_chars(value: &str, count: usize) -> String {
 
 fn skip_chars(value: &str, count: usize) -> String {
     value.chars().skip(count).collect()
+}
+
+fn slice_chars(value: &str, start: usize, end: usize) -> String {
+    value.chars().skip(start).take(end - start).collect()
 }
 
 fn katakana_to_hiragana(value: &str) -> String {
@@ -1528,6 +1617,34 @@ mod tests {
         });
         let candidates = converter.candidates();
         assert!(!candidates.iter().any(|candidate| candidate.text == "漢字"));
+    }
+
+    #[test]
+    fn dictionary_combines_multiple_segments() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "かく".to_string(),
+            vec![DictionaryEntry {
+                text: "書く".to_string(),
+                score: 10.0,
+            }],
+        );
+        entries.insert(
+            "こと".to_string(),
+            vec![DictionaryEntry {
+                text: "こと".to_string(),
+                score: 5.0,
+            }],
+        );
+        let mut converter = NativeConverter {
+            dictionary: Dictionary { entries },
+            ..Default::default()
+        };
+
+        let candidates = converter.append_text("kakukoto");
+        assert!(candidates.iter().any(|candidate| {
+            candidate.text == "書くこと" && candidate.corresponding_count == 4
+        }));
     }
 
     #[test]
