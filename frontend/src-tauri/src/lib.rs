@@ -7,14 +7,14 @@ use std::{path::PathBuf, sync::Mutex};
 #[derive(Debug)]
 pub struct AppState {
     settings: Mutex<AppConfig>,
-    ipc: ipc::IPCService,
+    ipc: Mutex<Option<ipc::IPCService>>,
 }
 
 impl AppState {
     fn new() -> Self {
         AppState {
             settings: Mutex::new(AppConfig::new()),
-            ipc: ipc::IPCService::new().unwrap(),
+            ipc: Mutex::new(ipc::IPCService::new().ok()),
         }
     }
 }
@@ -30,13 +30,28 @@ fn get_config(state: tauri::State<AppState>) -> AppConfig {
     config.clone()
 }
 
+fn notify_server_config_update(state: &tauri::State<AppState>) {
+    let Ok(mut ipc) = state.ipc.lock() else {
+        return;
+    };
+    if ipc.is_none() {
+        *ipc = ipc::IPCService::new().ok();
+    }
+    if let Some(service) = ipc.as_mut() {
+        if service.update_config().is_err() {
+            *ipc = None;
+        }
+    }
+}
+
 #[tauri::command]
-fn update_config(state: tauri::State<AppState>, new_config: AppConfig) {
+fn update_config(state: tauri::State<AppState>, new_config: AppConfig) -> Result<(), String> {
     let mut config = state.settings.lock().unwrap();
     *config = new_config;
     config.write();
 
-    state.ipc.clone().update_config().unwrap();
+    notify_server_config_update(&state);
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -120,11 +135,7 @@ fn update_user_dictionary(
         .collect::<Vec<_>>()
         .join("\n");
     std::fs::write(path, content).map_err(|error| error.to_string())?;
-    state
-        .ipc
-        .clone()
-        .update_config()
-        .map_err(|error| error.to_string())?;
+    notify_server_config_update(&state);
 
     Ok(())
 }
@@ -135,11 +146,7 @@ fn clear_learning_data(state: tauri::State<AppState>) -> Result<(), String> {
     if path.exists() {
         std::fs::remove_file(path).map_err(|error| error.to_string())?;
     }
-    state
-        .ipc
-        .clone()
-        .update_config()
-        .map_err(|error| error.to_string())?;
+    notify_server_config_update(&state);
 
     Ok(())
 }
@@ -175,11 +182,7 @@ fn update_input_table(state: tauri::State<AppState>, content: String) -> Result<
         .collect::<Vec<_>>()
         .join("\n");
     std::fs::write(path, sanitized).map_err(|error| error.to_string())?;
-    state
-        .ipc
-        .clone()
-        .update_config()
-        .map_err(|error| error.to_string())?;
+    notify_server_config_update(&state);
 
     Ok(())
 }
