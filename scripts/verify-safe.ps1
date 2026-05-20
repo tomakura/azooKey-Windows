@@ -9,6 +9,7 @@ $repo = Resolve-Path (Join-Path $PSScriptRoot "..")
 Push-Location $repo
 try {
     cargo fmt -- --check
+    cargo test -p shared
     cargo test -p azookey-converter
     cargo test -p azookey-windows --lib
     cargo check --workspace

@@ -9,8 +9,10 @@ pub mod proto {
 }
 
 fn get_config_root() -> PathBuf {
-    let appdata = PathBuf::from(std::env::var("APPDATA").unwrap());
-    appdata.join("Azookey")
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        .join("Azookey")
 }
 
 const SETTINGS_FILENAME: &str = "settings.json";
@@ -197,8 +199,13 @@ fn default_keyboard_layout() -> String {
 impl AppConfig {
     pub fn write(&self) {
         let config_path = get_config_root().join(SETTINGS_FILENAME);
-        let config_str = serde_json::to_string_pretty(self).unwrap();
-        std::fs::write(config_path, config_str).unwrap();
+        let Ok(config_str) = serde_json::to_string_pretty(self) else {
+            return;
+        };
+        if let Some(parent) = config_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(config_path, config_str);
     }
 
     pub fn read() -> Self {
@@ -206,17 +213,43 @@ impl AppConfig {
         if !config_path.exists() {
             return AppConfig::default();
         }
-        let config_str = std::fs::read_to_string(config_path).unwrap();
-        serde_json::from_str(&config_str).unwrap()
+        let Ok(config_str) = std::fs::read_to_string(config_path) else {
+            return AppConfig::default();
+        };
+        parse_config_or_default(&config_str)
     }
 
     pub fn new() -> Self {
         let config_path = get_config_root();
-        if !config_path.exists() {
-            std::fs::create_dir_all(&config_path).unwrap();
-        }
+        let _ = std::fs::create_dir_all(&config_path);
         let config = AppConfig::read();
         config.write();
         config
+    }
+}
+
+fn parse_config_or_default(config_str: &str) -> AppConfig {
+    serde_json::from_str(config_str).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_parse_falls_back_on_invalid_json() {
+        let config = parse_config_or_default("{invalid");
+        assert_eq!(config.version, default_version());
+        assert!(config.conversion.live_conversion);
+    }
+
+    #[test]
+    fn config_parse_migrates_missing_fields_with_defaults() {
+        let config = parse_config_or_default(r#"{"version":"old","conversion":{}}"#);
+        assert_eq!(config.version, "old");
+        assert!(config.conversion.prediction);
+        assert_eq!(config.conversion.input_style, "default");
+        assert_eq!(config.conversion.keyboard_layout, "system");
+        assert!(!config.zenzai.prediction);
     }
 }
