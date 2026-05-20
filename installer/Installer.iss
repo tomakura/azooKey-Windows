@@ -105,7 +105,7 @@ begin
   ExtractTemporaryFile('Azookey Startup.xml'); // ファイル展開
   TaskXmlPath := ExpandConstant('{tmp}\Azookey Startup.xml');
 
-  LoadStringFromFile(TaskXmlPath, TaskXmlContentAnsi)
+  LoadStringFromFile(TaskXmlPath, TaskXmlContentAnsi);
 
   TaskXmlContent := String(TaskXmlContentAnsi);
 

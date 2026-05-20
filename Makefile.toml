@@ -16,10 +16,20 @@ args = ["build", "-p", "azookey-windows", "--target=i686-pc-windows-msvc", "${@}
 
 [tasks.build_tauri]
 description = "Build the settings UI"
-script_runner = "@shell"
+script_runner = "powershell"
+script_extension = "ps1"
 script = """
-cd frontend
-npm run tauri build
+$npmCli = "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js"
+Push-Location frontend
+try {
+    if (Test-Path $npmCli) {
+        node $npmCli run tauri build
+    } else {
+        npm run tauri build
+    }
+} finally {
+    Pop-Location
+}
 """
 
 [tasks.build_installer]
