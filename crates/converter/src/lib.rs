@@ -59,6 +59,7 @@ pub struct ConversionConfig {
     pub prediction_enabled: bool,
     pub live_conversion_enabled: bool,
     pub typo_correction_enabled: bool,
+    pub dynamic_candidates_enabled: bool,
     pub input_style: String,
     pub custom_input_table_path: Option<PathBuf>,
 }
@@ -70,6 +71,7 @@ impl Default for ConversionConfig {
             prediction_enabled: true,
             live_conversion_enabled: true,
             typo_correction_enabled: true,
+            dynamic_candidates_enabled: true,
             input_style: "default".to_string(),
             custom_input_table_path: None,
         }
@@ -246,7 +248,9 @@ impl NativeConverter {
         }
 
         let mut candidates = self.user_dictionary.lookup_best_prefixes(&self.hiragana);
-        candidates.extend(DynamicDictionary::lookup_best_prefixes(&self.hiragana));
+        if self.conversion_config.dynamic_candidates_enabled {
+            candidates.extend(DynamicDictionary::lookup_best_prefixes(&self.hiragana));
+        }
         candidates.extend(self.magic_conversion.candidates(
             &self.magic_conversion_config,
             &self.context,
@@ -274,7 +278,9 @@ impl NativeConverter {
         }
         if self.conversion_config.prediction_enabled {
             candidates.extend(self.user_dictionary.lookup_predictions(&self.hiragana));
-            candidates.extend(DynamicDictionary::lookup_predictions(&self.hiragana));
+            if self.conversion_config.dynamic_candidates_enabled {
+                candidates.extend(DynamicDictionary::lookup_predictions(&self.hiragana));
+            }
             candidates.extend(self.emoji_dictionary.lookup_predictions(&self.hiragana));
             if self.conversion_config.learning_enabled {
                 candidates.extend(self.learning.lookup_predictions(&self.hiragana));
@@ -1940,6 +1946,19 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|candidate| candidate.text == "2026年5月20日"));
+    }
+
+    #[test]
+    fn dynamic_candidates_can_be_disabled() {
+        let mut converter = NativeConverter::default();
+        converter.configure_conversion(ConversionConfig {
+            dynamic_candidates_enabled: false,
+            ..Default::default()
+        });
+        let candidates = converter.append_text("kyou");
+        assert!(!candidates
+            .iter()
+            .any(|candidate| candidate.text.contains("年")));
     }
 
     #[test]

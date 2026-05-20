@@ -81,6 +81,7 @@ impl MyAzookeyService {
                 prediction_enabled: config.conversion.prediction,
                 live_conversion_enabled: config.conversion.live_conversion,
                 typo_correction_enabled: config.conversion.typo_correction,
+                dynamic_candidates_enabled: config.conversion.dynamic_candidates,
                 input_style: config.conversion.input_style,
                 custom_input_table_path: if config
                     .conversion

@@ -103,6 +103,8 @@ pub struct ConversionConfig {
     pub prediction: bool,
     #[serde(default = "default_enabled")]
     pub typo_correction: bool,
+    #[serde(default = "default_enabled")]
+    pub dynamic_candidates: bool,
     #[serde(default = "default_input_style")]
     pub input_style: String,
     #[serde(default)]
@@ -121,6 +123,7 @@ impl Default for ConversionConfig {
             live_conversion: default_enabled(),
             prediction: default_enabled(),
             typo_correction: default_enabled(),
+            dynamic_candidates: default_enabled(),
             input_style: default_input_style(),
             custom_input_table_path: String::new(),
             candidate_number_selection: default_enabled(),

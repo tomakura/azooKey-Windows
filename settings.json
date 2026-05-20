@@ -25,6 +25,7 @@
         "live_conversion": true,
         "prediction": true,
         "typo_correction": true,
+        "dynamic_candidates": true,
         "input_style": "default",
         "custom_input_table_path": "",
         "candidate_number_selection": true,

@@ -14,6 +14,7 @@ export const General = () => {
         live_conversion: true,
         prediction: true,
         typo_correction: true,
+        dynamic_candidates: true,
         input_style: "default",
         custom_input_table_path: "",
         candidate_number_selection: true,
@@ -30,6 +31,7 @@ export const General = () => {
                     live_conversion: data.conversion?.live_conversion ?? true,
                     prediction: data.conversion?.prediction ?? true,
                     typo_correction: data.conversion?.typo_correction ?? true,
+                    dynamic_candidates: data.conversion?.dynamic_candidates ?? true,
                     input_style: data.conversion?.input_style ?? "default",
                     custom_input_table_path: data.conversion?.custom_input_table_path ?? "",
                     candidate_number_selection: data.conversion?.candidate_number_selection ?? true,
@@ -94,6 +96,16 @@ export const General = () => {
         });
         if (data) {
             setValue((prev) => ({ ...prev, typo_correction }));
+        }
+    };
+
+    const handleDynamicCandidatesChange = async (dynamic_candidates: boolean) => {
+        const data = await updateConfig((data) => {
+            data.conversion = data.conversion ?? {};
+            data.conversion.dynamic_candidates = dynamic_candidates;
+        });
+        if (data) {
+            setValue((prev) => ({ ...prev, dynamic_candidates }));
         }
     };
 
@@ -212,6 +224,18 @@ export const General = () => {
                         </p>
                     </div>
                     <Switch checked={value.typo_correction} onCheckedChange={handleTypoCorrectionChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Lightbulb />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            日付・時刻候補
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            きょう、あした、いまなどの特殊候補を表示します
+                        </p>
+                    </div>
+                    <Switch checked={value.dynamic_candidates} onCheckedChange={handleDynamicCandidatesChange} />
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <Keyboard />
