@@ -50,6 +50,8 @@ export const Zenzai = () => {
     const [value, setValue] = useState({
         enable: false,
         profile: "",
+        personalization: false,
+        personalization_path: "",
         backend: "",
         inference_limit: 1,
         timeout_ms: 1500,
@@ -78,6 +80,8 @@ export const Zenzai = () => {
                 setValue({
                     enable: zenzai.enable,
                     profile: zenzai.profile,
+                    personalization: zenzai.personalization ?? false,
+                    personalization_path: zenzai.personalization_path ?? "",
                     backend: zenzai.backend,
                     inference_limit: zenzai.inference_limit ?? 1,
                     timeout_ms: zenzai.timeout_ms ?? 1500,
@@ -134,6 +138,25 @@ export const Zenzai = () => {
         
         updateConfig((data) => {
             data.zenzai.profile = newProfile;
+        });
+    };
+
+    const handlePersonalizationChange = async () => {
+        const data = await updateConfig((data) => {
+            data.zenzai.personalization = !value.personalization;
+        });
+
+        if (data) {
+            setValue((prev) => ({ ...prev, personalization: data.zenzai.personalization }));
+        }
+    };
+
+    const handlePersonalizationPathChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const personalization_path = event.target.value;
+        setValue((prev) => ({ ...prev, personalization_path }));
+
+        updateConfig((data) => {
+            data.zenzai.personalization_path = personalization_path;
         });
     };
 
@@ -278,6 +301,32 @@ export const Zenzai = () => {
                         </div>
                     </div>
                     <Textarea placeholder="例）山田太郎、数学科の学生。" value={value.profile} disabled={!value.enable} onChange={handleProfileChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <User />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            パーソナライズ
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            ローカルの文脈ファイルをZenzaiのプロンプトに追加します
+                        </p>
+                    </div>
+                    <Switch checked={value.personalization} disabled={!value.enable} onCheckedChange={handlePersonalizationChange} />
+                </div>
+                <div className="space-y-4 rounded-md border p-4">
+                    <div className="flex items-center space-x-4">
+                        <FileCode2 />
+                        <div className="flex-1 space-y-1">
+                            <p className="text-sm font-medium leading-none">
+                                パーソナライズファイル
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                最大4096文字を変換文脈として読み込みます
+                            </p>
+                        </div>
+                    </div>
+                    <Input placeholder="C:\\path\\to\\personalization.txt" value={value.personalization_path} disabled={!value.enable || !value.personalization} onChange={handlePersonalizationPathChange} />
                 </div>
                 <div className="space-y-4 rounded-md border p-4">
                     <div className="flex items-center space-x-4">

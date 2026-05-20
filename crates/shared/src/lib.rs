@@ -21,6 +21,10 @@ pub struct ZenzaiConfig {
     pub enable: bool,
     #[serde(default)]
     pub profile: String,
+    #[serde(default)]
+    pub personalization: bool,
+    #[serde(default)]
+    pub personalization_path: String,
     #[serde(default = "default_zenzai_backend")]
     pub backend: String,
     #[serde(default = "default_zenzai_inference_limit")]
@@ -62,6 +66,8 @@ impl Default for ZenzaiConfig {
         ZenzaiConfig {
             enable: false,
             profile: "".to_string(),
+            personalization: false,
+            personalization_path: "".to_string(),
             backend: default_zenzai_backend(),
             inference_limit: default_zenzai_inference_limit(),
             model_path: "".to_string(),

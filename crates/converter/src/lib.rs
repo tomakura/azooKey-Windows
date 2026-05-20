@@ -38,6 +38,8 @@ pub struct ZenzaiConfig {
     pub model_path: PathBuf,
     pub command_path: PathBuf,
     pub profile: String,
+    pub personalization_enabled: bool,
+    pub personalization_path: PathBuf,
     pub inference_limit: usize,
     pub timeout_ms: u64,
     pub prediction_enabled: bool,
@@ -92,6 +94,8 @@ impl ZenzaiConfig {
             model_path,
             command_path,
             profile: String::new(),
+            personalization_enabled: false,
+            personalization_path: PathBuf::new(),
             inference_limit: 1,
             timeout_ms: 1500,
             prediction_enabled: false,
@@ -516,8 +520,11 @@ impl ZenzaiEngine {
         }
 
         let prompt = format!(
-            "あなたは日本語IMEの予測変換エンジンです。\n文脈: {}\nプロフィール: {}\n読み: {}\n自然な変換候補を最大3個、1行1候補で出力してください。説明は不要です。",
-            context, config.profile, hiragana
+            "あなたは日本語IMEの予測変換エンジンです。\n文脈: {}\nプロフィール: {}\nパーソナライズ情報: {}\n読み: {}\n自然な変換候補を最大3個、1行1候補で出力してください。説明は不要です。",
+            context,
+            config.profile,
+            personalization_text(config),
+            hiragana
         );
         let Some(output) = run_zenzai_command(config, prompt, config.prediction_token_limit.max(4))
         else {
@@ -545,8 +552,12 @@ impl ZenzaiEngine {
             .collect::<Vec<_>>()
             .join("\n");
         let prompt = format!(
-            "あなたは日本語IMEの変換候補を選ぶエンジンです。\n文脈: {}\nプロフィール: {}\n読み: {}\n候補:\n{}\n最も自然な候補の番号だけを1つ出力してください。",
-            context, config.profile, hiragana, numbered
+            "あなたは日本語IMEの変換候補を選ぶエンジンです。\n文脈: {}\nプロフィール: {}\nパーソナライズ情報: {}\n読み: {}\n候補:\n{}\n最も自然な候補の番号だけを1つ出力してください。",
+            context,
+            config.profile,
+            personalization_text(config),
+            hiragana,
+            numbered
         );
 
         let Some(output) = run_zenzai_command(config, prompt, config.inference_limit.max(1)) else {
@@ -603,6 +614,16 @@ fn zenzai_candidates_from_output(output: &str, hiragana: &str) -> Vec<Candidate>
             corresponding_count: hiragana.chars().count() as i32,
         })
         .collect()
+}
+
+fn personalization_text(config: &ZenzaiConfig) -> String {
+    if !config.personalization_enabled || config.personalization_path.as_os_str().is_empty() {
+        return String::new();
+    }
+
+    fs::read_to_string(&config.personalization_path)
+        .map(|content| content.chars().take(4096).collect())
+        .unwrap_or_default()
 }
 
 fn run_zenzai_command(config: &ZenzaiConfig, prompt: String, limit: usize) -> Option<String> {
@@ -1900,6 +1921,24 @@ mod tests {
         assert_eq!(candidates[0].text, "候補A");
         assert_eq!(candidates[0].corresponding_count, 2);
         assert_eq!(candidates[1].text, "候補B");
+    }
+
+    #[test]
+    fn zenzai_personalization_reads_bounded_text() {
+        let path = std::env::temp_dir().join(format!(
+            "azookey-zenzai-personalization-{}.txt",
+            std::process::id()
+        ));
+        fs::write(&path, "abcdef").unwrap();
+        let config = ZenzaiConfig {
+            personalization_enabled: true,
+            personalization_path: path.clone(),
+            ..ZenzaiConfig::disabled(PathBuf::new(), PathBuf::new())
+        };
+
+        assert_eq!(personalization_text(&config), "abcdef");
+
+        let _ = fs::remove_file(path);
     }
 
     #[test]

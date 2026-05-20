@@ -98,6 +98,8 @@ impl MyAzookeyService {
                 model_path,
                 command_path,
                 profile: config.zenzai.profile,
+                personalization_enabled: config.zenzai.personalization,
+                personalization_path: PathBuf::from(config.zenzai.personalization_path),
                 inference_limit: config.zenzai.inference_limit,
                 timeout_ms: config.zenzai.timeout_ms,
                 prediction_enabled: config.zenzai.prediction,

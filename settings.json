@@ -3,6 +3,8 @@
     "zenzai": {
         "enable": false,
         "profile": "",
+        "personalization": false,
+        "personalization_path": "",
         "backend": "cpu",
         "inference_limit": 1,
         "model_path": "",
