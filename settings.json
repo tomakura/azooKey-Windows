@@ -27,6 +27,7 @@
         "typo_correction": true,
         "input_style": "default",
         "custom_input_table_path": "",
-        "candidate_number_selection": true
+        "candidate_number_selection": true,
+        "symbol_input_style": "japanese"
     }
 }

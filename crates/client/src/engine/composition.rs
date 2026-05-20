@@ -50,6 +50,13 @@ pub struct Composition {
     pub tip_composition: Option<ITfComposition>,
 }
 
+fn normalize_kana_input(text: &str, symbol_input_style: &str) -> String {
+    match symbol_input_style {
+        "raw" => text.to_string(),
+        _ => to_fullwidth(text, false),
+    }
+}
+
 impl ITfCompositionSink_Impl for TextServiceFactory_Impl {
     #[macros::anyhow]
     fn OnCompositionTerminated(
@@ -369,6 +376,8 @@ impl TextServiceFactory {
         let mut corresponding_count = composition.corresponding_count.clone();
         let mut candidates = composition.candidates.clone();
         let mut selection_index = composition.selection_index;
+        let app_config = shared::AppConfig::read();
+        let symbol_input_style = app_config.conversion.symbol_input_style;
         let mut ipc_service = IMEState::get()?
             .ipc_service
             .clone()
@@ -409,7 +418,7 @@ impl TextServiceFactory {
                     raw_input.push_str(&text);
 
                     let text = match mode {
-                        InputMode::Kana => to_fullwidth(text, false),
+                        InputMode::Kana => normalize_kana_input(text, &symbol_input_style),
                         InputMode::Latin => text.to_string(),
                     };
 
@@ -531,7 +540,7 @@ impl TextServiceFactory {
 
                     ipc_service.shrink_text(corresponding_count.clone())?;
                     let text = match mode {
-                        InputMode::Kana => to_fullwidth(text, false),
+                        InputMode::Kana => normalize_kana_input(text, &symbol_input_style),
                         InputMode::Latin => text.to_string(),
                     };
                     candidates = ipc_service.append_text(text)?;
@@ -593,12 +602,19 @@ fn candidate_number_to_index(number: i8) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::candidate_number_to_index;
+    use super::{candidate_number_to_index, normalize_kana_input};
 
     #[test]
     fn maps_number_keys_to_candidate_indexes() {
         assert_eq!(candidate_number_to_index(1), 0);
         assert_eq!(candidate_number_to_index(9), 8);
         assert_eq!(candidate_number_to_index(0), 9);
+    }
+
+    #[test]
+    fn normalizes_kana_symbols_from_config() {
+        assert_eq!(normalize_kana_input(",", "japanese"), "、");
+        assert_eq!(normalize_kana_input(".", "japanese"), "。");
+        assert_eq!(normalize_kana_input(",", "raw"), ",");
     }
 }

@@ -107,6 +107,8 @@ pub struct ConversionConfig {
     pub custom_input_table_path: String,
     #[serde(default = "default_enabled")]
     pub candidate_number_selection: bool,
+    #[serde(default = "default_symbol_input_style")]
+    pub symbol_input_style: String,
 }
 
 impl Default for ConversionConfig {
@@ -118,6 +120,7 @@ impl Default for ConversionConfig {
             input_style: default_input_style(),
             custom_input_table_path: String::new(),
             candidate_number_selection: default_enabled(),
+            symbol_input_style: default_symbol_input_style(),
         }
     }
 }
@@ -178,6 +181,10 @@ fn default_enabled() -> bool {
 
 fn default_input_style() -> String {
     "default".to_string()
+}
+
+fn default_symbol_input_style() -> String {
+    "japanese".to_string()
 }
 
 impl AppConfig {
