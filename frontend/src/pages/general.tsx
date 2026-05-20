@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { invoke } from "@tauri-apps/api/core";
 import { BrainCircuit, ExternalLink, Keyboard, Lightbulb, RefreshCcw, SpellCheck, Trash2, WandSparkles } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -19,6 +20,7 @@ export const General = () => {
         symbol_input_style: "japanese",
         keyboard_layout: "system",
     });
+    const [inputTable, setInputTable] = useState("");
 
     useEffect(() => {
         invoke<any>("get_config")
@@ -38,6 +40,9 @@ export const General = () => {
             .catch(() => {
                 toast("設定の読み込みに失敗しました");
             });
+        invoke<string>("get_input_table")
+            .then(setInputTable)
+            .catch(() => toast("入力テーブルの読み込みに失敗しました"));
     }, []);
 
     const updateConfig = async (updater: (config: any) => void) => {
@@ -149,6 +154,25 @@ export const General = () => {
         }
     };
 
+    const handleSaveInputTable = async () => {
+        try {
+            await invoke("update_input_table", { content: inputTable });
+            await updateConfig((data) => {
+                data.conversion = data.conversion ?? {};
+                data.conversion.input_style = "custom";
+                data.conversion.custom_input_table_path = "";
+            });
+            setValue((prev) => ({
+                ...prev,
+                input_style: "custom",
+                custom_input_table_path: "",
+            }));
+            toast("入力テーブルを保存しました");
+        } catch {
+            toast("入力テーブルの保存に失敗しました");
+        }
+    };
+
     return (
         <div className="space-y-8">
             <section className="space-y-2">
@@ -217,6 +241,16 @@ export const General = () => {
                                 placeholder="%APPDATA%\\Azookey\\input_table.tsv"
                                 onChange={(event) => handleCustomInputTablePathChange(event.target.value)}
                             />
+                        </div>
+                        <div className="space-y-2">
+                            <Textarea
+                                value={inputTable}
+                                placeholder={"vv\tゔ\nka\tか"}
+                                onChange={(event) => setInputTable(event.target.value)}
+                            />
+                            <Button variant="secondary" onClick={handleSaveInputTable}>
+                                保存してカスタムを使用
+                            </Button>
                         </div>
                     </div>
                 </div>

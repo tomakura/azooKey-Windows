@@ -61,6 +61,13 @@ fn learning_data_path() -> Result<PathBuf, String> {
         .join("learning.tsv"))
 }
 
+fn input_table_path() -> Result<PathBuf, String> {
+    let appdata = std::env::var_os("APPDATA").ok_or("APPDATA is not set")?;
+    Ok(PathBuf::from(appdata)
+        .join("Azookey")
+        .join("input_table.tsv"))
+}
+
 #[tauri::command]
 fn get_user_dictionary() -> Result<Vec<UserDictionaryEntry>, String> {
     let path = user_dictionary_path()?;
@@ -137,6 +144,46 @@ fn clear_learning_data(state: tauri::State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn get_input_table() -> Result<String, String> {
+    let path = input_table_path()?;
+    Ok(std::fs::read_to_string(path).unwrap_or_default())
+}
+
+#[tauri::command]
+fn update_input_table(state: tauri::State<AppState>, content: String) -> Result<(), String> {
+    let path = input_table_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    let sanitized = content
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                return Some(line.to_string());
+            }
+            let mut fields = line.splitn(2, '\t');
+            let key = fields.next()?.trim().replace(['\t', '\r', '\n'], "");
+            let value = fields.next()?.trim().replace(['\t', '\r', '\n'], "");
+            if key.is_empty() || value.is_empty() {
+                return None;
+            }
+            Some(format!("{key}\t{value}"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(path, sanitized).map_err(|error| error.to_string())?;
+    state
+        .ipc
+        .clone()
+        .update_config()
+        .map_err(|error| error.to_string())?;
+
+    Ok(())
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct Capability {
     cpu: bool,
@@ -199,6 +246,8 @@ pub fn run() {
             get_user_dictionary,
             update_user_dictionary,
             clear_learning_data,
+            get_input_table,
+            update_input_table,
             check_capability
         ])
         .run(tauri::generate_context!())
