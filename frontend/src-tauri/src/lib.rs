@@ -43,6 +43,7 @@ fn update_config(state: tauri::State<AppState>, new_config: AppConfig) {
 struct UserDictionaryEntry {
     reading: String,
     text: String,
+    part_of_speech: String,
 }
 
 fn user_dictionary_path() -> Result<PathBuf, String> {
@@ -70,15 +71,17 @@ fn get_user_dictionary() -> Result<Vec<UserDictionaryEntry>, String> {
     let entries = content
         .lines()
         .filter_map(|line| {
-            let mut fields = line.splitn(2, '\t');
+            let mut fields = line.splitn(3, '\t');
             let reading = fields.next()?.trim();
             let text = fields.next()?.trim();
+            let part_of_speech = fields.next().map(str::trim).unwrap_or_default();
             if reading.is_empty() || text.is_empty() {
                 return None;
             }
             Some(UserDictionaryEntry {
                 reading: reading.to_string(),
                 text: text.to_string(),
+                part_of_speech: part_of_speech.to_string(),
             })
         })
         .collect();
@@ -101,10 +104,11 @@ fn update_user_dictionary(
         .filter_map(|entry| {
             let reading = entry.reading.trim().replace(['\t', '\r', '\n'], "");
             let text = entry.text.trim().replace(['\t', '\r', '\n'], "");
+            let part_of_speech = entry.part_of_speech.trim().replace(['\t', '\r', '\n'], "");
             if reading.is_empty() || text.is_empty() {
                 return None;
             }
-            Some(format!("{reading}\t{text}"))
+            Some(format!("{reading}\t{text}\t{part_of_speech}"))
         })
         .collect::<Vec<_>>()
         .join("\n");

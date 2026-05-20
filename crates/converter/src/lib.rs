@@ -757,7 +757,7 @@ impl UserDictionary {
 
         let mut entries: HashMap<String, Vec<String>> = HashMap::new();
         for line in content.lines() {
-            let mut fields = line.splitn(2, '\t');
+            let mut fields = line.splitn(3, '\t');
             let Some(reading) = fields.next().map(str::trim) else {
                 continue;
             };
@@ -1585,6 +1585,24 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|candidate| candidate.text == "学習漢字"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn user_dictionary_ignores_part_of_speech_column() {
+        let path = std::env::temp_dir().join(format!(
+            "azookey-user-dictionary-pos-{}.tsv",
+            std::process::id()
+        ));
+        fs::write(&path, "かんじ\t漢字\t普通名詞").unwrap();
+
+        let mut converter = NativeConverter {
+            user_dictionary: UserDictionary::load(Some(path.clone())),
+            ..Default::default()
+        };
+        let candidates = converter.append_text("kanji");
+        assert_eq!(candidates[0].text, "漢字");
 
         let _ = fs::remove_file(path);
     }

@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 type UserDictionaryEntry = {
     reading: string;
     text: string;
+    part_of_speech: string;
 };
 
 export const UserDictionary = () => {
@@ -29,7 +30,7 @@ export const UserDictionary = () => {
     };
 
     const addEntry = () => {
-        setEntries((prev) => [...prev, { reading: "", text: "" }]);
+        setEntries((prev) => [...prev, { reading: "", text: "", part_of_speech: "" }]);
     };
 
     const removeEntry = (index: number) => {
@@ -69,13 +70,14 @@ export const UserDictionary = () => {
                     </Button>
                 </div>
                 <div className="space-y-2 rounded-md border p-4">
-                    <div className="grid grid-cols-[1fr_1fr_2.5rem] gap-2 px-1 text-xs text-muted-foreground">
+                    <div className="grid grid-cols-[1fr_1fr_0.8fr_2.5rem] gap-2 px-1 text-xs text-muted-foreground">
                         <span>読み</span>
                         <span>候補</span>
+                        <span>品詞</span>
                         <span />
                     </div>
                     {entries.map((entry, index) => (
-                        <div key={index} className="grid grid-cols-[1fr_1fr_2.5rem] gap-2">
+                        <div key={index} className="grid grid-cols-[1fr_1fr_0.8fr_2.5rem] gap-2">
                             <Input
                                 value={entry.reading}
                                 placeholder="かんじ"
@@ -85,6 +87,11 @@ export const UserDictionary = () => {
                                 value={entry.text}
                                 placeholder="漢字"
                                 onChange={(event) => updateEntry(index, "text", event.target.value)}
+                            />
+                            <Input
+                                value={entry.part_of_speech}
+                                placeholder="普通名詞"
+                                onChange={(event) => updateEntry(index, "part_of_speech", event.target.value)}
                             />
                             <Button
                                 aria-label="削除"
