@@ -100,6 +100,8 @@ impl MyAzookeyService {
                 profile: config.zenzai.profile,
                 inference_limit: config.zenzai.inference_limit,
                 timeout_ms: config.zenzai.timeout_ms,
+                prediction_enabled: config.zenzai.prediction,
+                prediction_token_limit: config.zenzai.prediction_token_limit,
             });
             converter.configure_magic_conversion(NativeMagicConversionConfig {
                 enabled: config.magic_conversion.enable,

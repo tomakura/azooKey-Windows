@@ -7,7 +7,9 @@
         "inference_limit": 1,
         "model_path": "",
         "command_path": "",
-        "timeout_ms": 1500
+        "timeout_ms": 1500,
+        "prediction": false,
+        "prediction_token_limit": 32
     },
     "magic_conversion": {
         "enable": false,

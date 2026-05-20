@@ -55,6 +55,8 @@ export const Zenzai = () => {
         timeout_ms: 1500,
         model_path: "",
         command_path: "",
+        prediction: false,
+        prediction_token_limit: 32,
     });
     const [magicConversion, setMagicConversion] = useState({
         enable: false,
@@ -81,6 +83,8 @@ export const Zenzai = () => {
                     timeout_ms: zenzai.timeout_ms ?? 1500,
                     model_path: zenzai.model_path ?? "",
                     command_path: zenzai.command_path ?? "",
+                    prediction: zenzai.prediction ?? false,
+                    prediction_token_limit: zenzai.prediction_token_limit ?? 32,
                 });
                 const magic = data.magic_conversion ?? {};
                 setMagicConversion({
@@ -183,6 +187,25 @@ export const Zenzai = () => {
         });
     };
 
+    const handleZenzaiPredictionChange = async () => {
+        const data = await updateConfig((data) => {
+            data.zenzai.prediction = !value.prediction;
+        });
+
+        if (data) {
+            setValue((prev) => ({ ...prev, prediction: data.zenzai.prediction }));
+        }
+    };
+
+    const handlePredictionTokenLimitChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const prediction_token_limit = Math.max(4, Number(event.target.value) || 32);
+        setValue((prev) => ({ ...prev, prediction_token_limit }));
+
+        updateConfig((data) => {
+            data.zenzai.prediction_token_limit = prediction_token_limit;
+        });
+    };
+
     const handleMagicConversionChange = async () => {
         const data = await updateConfig((data) => {
             data.magic_conversion = data.magic_conversion ?? {};
@@ -229,6 +252,18 @@ export const Zenzai = () => {
                         </p>
                     </div>
                     <Switch checked={value.enable} onCheckedChange={handleZenzaiChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Bot />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            Zenzai予測
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            Zenzaiに読みから追加候補を生成させます
+                        </p>
+                    </div>
+                    <Switch checked={value.prediction} disabled={!value.enable} onCheckedChange={handleZenzaiPredictionChange} />
                 </div>
                 <div className="space-y-4 rounded-md border p-4">
                     <div className="flex items-center space-x-4 ">
@@ -295,6 +330,18 @@ export const Zenzai = () => {
                         </p>
                     </div>
                     <Input className="w-28" type="number" min={100} step={100} value={value.timeout_ms} disabled={!value.enable} onChange={handleTimeoutChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Gauge />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            Zenzai予測トークン数
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            追加候補を生成するための最大トークン数
+                        </p>
+                    </div>
+                    <Input className="w-24" type="number" min={4} max={128} value={value.prediction_token_limit} disabled={!value.enable || !value.prediction} onChange={handlePredictionTokenLimitChange} />
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <Cpu />

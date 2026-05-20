@@ -40,6 +40,8 @@ pub struct ZenzaiConfig {
     pub profile: String,
     pub inference_limit: usize,
     pub timeout_ms: u64,
+    pub prediction_enabled: bool,
+    pub prediction_token_limit: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -92,6 +94,8 @@ impl ZenzaiConfig {
             profile: String::new(),
             inference_limit: 1,
             timeout_ms: 1500,
+            prediction_enabled: false,
+            prediction_token_limit: 32,
         }
     }
 }
@@ -241,6 +245,11 @@ impl NativeConverter {
         candidates.extend(DynamicDictionary::lookup_best_prefixes(&self.hiragana));
         candidates.extend(self.magic_conversion.candidates(
             &self.magic_conversion_config,
+            &self.context,
+            &self.hiragana,
+        ));
+        candidates.extend(self.zenzai.prediction_candidates(
+            &self.zenzai_config,
             &self.context,
             &self.hiragana,
         ));
@@ -492,6 +501,32 @@ fn magic_candidates_from_output(output: &str, hiragana: &str) -> Vec<Candidate> 
 impl ZenzaiEngine {
     fn reset(&mut self) {}
 
+    fn prediction_candidates(
+        &mut self,
+        config: &ZenzaiConfig,
+        context: &str,
+        hiragana: &str,
+    ) -> Vec<Candidate> {
+        if !config.enabled
+            || !config.prediction_enabled
+            || hiragana.chars().count() < 2
+            || !config.model_path.exists()
+        {
+            return Vec::new();
+        }
+
+        let prompt = format!(
+            "あなたは日本語IMEの予測変換エンジンです。\n文脈: {}\nプロフィール: {}\n読み: {}\n自然な変換候補を最大3個、1行1候補で出力してください。説明は不要です。",
+            context, config.profile, hiragana
+        );
+        let Some(output) = run_zenzai_command(config, prompt, config.prediction_token_limit.max(4))
+        else {
+            return Vec::new();
+        };
+
+        zenzai_candidates_from_output(&output, hiragana)
+    }
+
     fn rerank(
         &mut self,
         config: &ZenzaiConfig,
@@ -514,7 +549,7 @@ impl ZenzaiEngine {
             context, config.profile, hiragana, numbered
         );
 
-        let Some(output) = run_zenzai_command(config, prompt) else {
+        let Some(output) = run_zenzai_command(config, prompt, config.inference_limit.max(1)) else {
             return candidates;
         };
 
@@ -550,8 +585,27 @@ fn run_magic_conversion_command(
     read_child_with_timeout(&mut child, config.timeout_ms)
 }
 
-fn run_zenzai_command(config: &ZenzaiConfig, prompt: String) -> Option<String> {
-    let limit = config.inference_limit.max(1);
+fn zenzai_candidates_from_output(output: &str, hiragana: &str) -> Vec<Candidate> {
+    output
+        .lines()
+        .map(|line| {
+            line.trim()
+                .trim_start_matches(|ch: char| {
+                    ch.is_ascii_digit() || ch == '.' || ch == ')' || ch == '、'
+                })
+                .trim()
+        })
+        .filter(|line| !line.is_empty())
+        .take(3)
+        .map(|text| Candidate {
+            text: text.to_string(),
+            subtext: String::new(),
+            corresponding_count: hiragana.chars().count() as i32,
+        })
+        .collect()
+}
+
+fn run_zenzai_command(config: &ZenzaiConfig, prompt: String, limit: usize) -> Option<String> {
     let mut child = Command::new(&config.command_path)
         .arg("-m")
         .arg(&config.model_path)
@@ -1837,6 +1891,15 @@ mod tests {
         assert_eq!(candidates[0].text, "いい感じの候補");
         assert_eq!(candidates[0].corresponding_count, 2);
         assert_eq!(candidates[1].text, "別候補");
+    }
+
+    #[test]
+    fn zenzai_prediction_parses_numbered_candidates() {
+        let candidates = zenzai_candidates_from_output("1. 候補A\n2) 候補B\n", "よみ");
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].text, "候補A");
+        assert_eq!(candidates[0].corresponding_count, 2);
+        assert_eq!(candidates[1].text, "候補B");
     }
 
     #[test]

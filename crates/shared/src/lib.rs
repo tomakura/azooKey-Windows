@@ -31,6 +31,10 @@ pub struct ZenzaiConfig {
     pub command_path: String,
     #[serde(default = "default_zenzai_timeout_ms")]
     pub timeout_ms: u64,
+    #[serde(default)]
+    pub prediction: bool,
+    #[serde(default = "default_zenzai_prediction_token_limit")]
+    pub prediction_token_limit: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -63,6 +67,8 @@ impl Default for ZenzaiConfig {
             model_path: "".to_string(),
             command_path: "".to_string(),
             timeout_ms: default_zenzai_timeout_ms(),
+            prediction: false,
+            prediction_token_limit: default_zenzai_prediction_token_limit(),
         }
     }
 }
@@ -147,6 +153,10 @@ fn default_zenzai_inference_limit() -> usize {
 
 fn default_zenzai_timeout_ms() -> u64 {
     1500
+}
+
+fn default_zenzai_prediction_token_limit() -> usize {
+    32
 }
 
 fn default_magic_conversion_timeout_ms() -> u64 {
