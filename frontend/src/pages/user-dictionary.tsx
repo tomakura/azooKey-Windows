@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { BookOpenText, Plus, Save, Trash2 } from "lucide-react";
+import { BookOpenText, Plus, Save, Trash2, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 type UserDictionaryEntry = {
     reading: string;
@@ -14,6 +15,7 @@ type UserDictionaryEntry = {
 
 export const UserDictionary = () => {
     const [entries, setEntries] = useState<UserDictionaryEntry[]>([]);
+    const [bulkText, setBulkText] = useState("");
 
     useEffect(() => {
         invoke<UserDictionaryEntry[]>("get_user_dictionary")
@@ -46,6 +48,42 @@ export const UserDictionary = () => {
         }
     };
 
+    const importBulkEntries = () => {
+        const imported = bulkText
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line && !line.startsWith("#"))
+            .map((line) => {
+                const fields = line.includes("\t") ? line.split("\t") : line.split(",");
+                return {
+                    reading: fields[0]?.trim() ?? "",
+                    text: fields[1]?.trim() ?? "",
+                    part_of_speech: fields[2]?.trim() ?? "",
+                };
+            })
+            .filter((entry) => entry.reading && entry.text);
+
+        if (imported.length === 0) {
+            toast("取り込める行がありません");
+            return;
+        }
+
+        setEntries((prev) => {
+            const seen = new Set(prev.map((entry) => `${entry.reading}\t${entry.text}`));
+            const next = [...prev];
+            for (const entry of imported) {
+                const key = `${entry.reading}\t${entry.text}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    next.push(entry);
+                }
+            }
+            return next;
+        });
+        setBulkText("");
+        toast(`${imported.length}件を取り込みました`);
+    };
+
     return (
         <div className="space-y-8">
             <section className="space-y-2">
@@ -70,6 +108,27 @@ export const UserDictionary = () => {
                     </Button>
                 </div>
                 <div className="space-y-2 rounded-md border p-4">
+                    <div className="space-y-2 rounded-md border border-dashed p-3">
+                        <div className="flex items-center gap-3">
+                            <Upload className="size-4" />
+                            <div className="flex-1 space-y-1">
+                                <p className="text-sm font-medium leading-none">
+                                    一括取り込み
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                    {"読み,候補,品詞 または 読み<TAB>候補<TAB>品詞 の行を追加します"}
+                                </p>
+                            </div>
+                            <Button variant="secondary" onClick={importBulkEntries}>
+                                取り込み
+                            </Button>
+                        </div>
+                        <Textarea
+                            value={bulkText}
+                            placeholder={"かんじ\t漢字\t普通名詞"}
+                            onChange={(event) => setBulkText(event.target.value)}
+                        />
+                    </div>
                     <div className="grid grid-cols-[1fr_1fr_0.8fr_2.5rem] gap-2 px-1 text-xs text-muted-foreground">
                         <span>読み</span>
                         <span>候補</span>
