@@ -17,6 +17,7 @@ export const General = () => {
         custom_input_table_path: "",
         candidate_number_selection: true,
         symbol_input_style: "japanese",
+        keyboard_layout: "system",
     });
 
     useEffect(() => {
@@ -31,6 +32,7 @@ export const General = () => {
                     custom_input_table_path: data.conversion?.custom_input_table_path ?? "",
                     candidate_number_selection: data.conversion?.candidate_number_selection ?? true,
                     symbol_input_style: data.conversion?.symbol_input_style ?? "japanese",
+                    keyboard_layout: data.conversion?.keyboard_layout ?? "system",
                 });
             })
             .catch(() => {
@@ -125,6 +127,16 @@ export const General = () => {
         });
         if (data) {
             setValue((prev) => ({ ...prev, symbol_input_style }));
+        }
+    };
+
+    const handleKeyboardLayoutChange = async (keyboard_layout: string) => {
+        const data = await updateConfig((data) => {
+            data.conversion = data.conversion ?? {};
+            data.conversion.keyboard_layout = keyboard_layout;
+        });
+        if (data) {
+            setValue((prev) => ({ ...prev, keyboard_layout }));
         }
     };
 
@@ -249,6 +261,26 @@ export const General = () => {
                         <SelectContent>
                             <SelectItem value="japanese">日本語記号</SelectItem>
                             <SelectItem value="raw">そのまま</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Keyboard />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            キーボード配列
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            OS配列に応じてIME内部のローマ字入力を補正します
+                        </p>
+                    </div>
+                    <Select value={value.keyboard_layout} onValueChange={handleKeyboardLayoutChange}>
+                        <SelectTrigger className="w-44">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="system">システム配列</SelectItem>
+                            <SelectItem value="dvorak_qwerty">Dvorak-QWERTY</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>

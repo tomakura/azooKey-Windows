@@ -57,6 +57,60 @@ fn normalize_kana_input(text: &str, symbol_input_style: &str) -> String {
     }
 }
 
+fn normalize_keyboard_layout_input(text: &str, keyboard_layout: &str) -> String {
+    if keyboard_layout != "dvorak_qwerty" {
+        return text.to_string();
+    }
+
+    text.chars().map(dvorak_to_qwerty).collect()
+}
+
+fn dvorak_to_qwerty(ch: char) -> char {
+    let lower = ch.to_ascii_lowercase();
+    let mapped = match lower {
+        '\'' => 'q',
+        ',' => 'w',
+        '.' => 'e',
+        'p' => 'r',
+        'y' => 't',
+        'f' => 'y',
+        'g' => 'u',
+        'c' => 'i',
+        'r' => 'o',
+        'l' => 'p',
+        '/' => '[',
+        '=' => ']',
+        'a' => 'a',
+        'o' => 's',
+        'e' => 'd',
+        'u' => 'f',
+        'i' => 'g',
+        'd' => 'h',
+        'h' => 'j',
+        't' => 'k',
+        'n' => 'l',
+        's' => ';',
+        '-' => '\'',
+        ';' => 'z',
+        'q' => 'x',
+        'j' => 'c',
+        'k' => 'v',
+        'x' => 'b',
+        'b' => 'n',
+        'm' => 'm',
+        'w' => ',',
+        'v' => '.',
+        'z' => '/',
+        _ => ch,
+    };
+
+    if ch.is_ascii_uppercase() {
+        mapped.to_ascii_uppercase()
+    } else {
+        mapped
+    }
+}
+
 impl ITfCompositionSink_Impl for TextServiceFactory_Impl {
     #[macros::anyhow]
     fn OnCompositionTerminated(
@@ -378,6 +432,7 @@ impl TextServiceFactory {
         let mut selection_index = composition.selection_index;
         let app_config = shared::AppConfig::read();
         let symbol_input_style = app_config.conversion.symbol_input_style;
+        let keyboard_layout = app_config.conversion.keyboard_layout;
         let mut ipc_service = IMEState::get()?
             .ipc_service
             .clone()
@@ -415,10 +470,11 @@ impl TextServiceFactory {
                     ipc_service.clear_text()?;
                 }
                 ClientAction::AppendText(text) => {
+                    let text = normalize_keyboard_layout_input(text, &keyboard_layout);
                     raw_input.push_str(&text);
 
                     let text = match mode {
-                        InputMode::Kana => normalize_kana_input(text, &symbol_input_style),
+                        InputMode::Kana => normalize_kana_input(&text, &symbol_input_style),
                         InputMode::Latin => text.to_string(),
                     };
 
@@ -532,6 +588,7 @@ impl TextServiceFactory {
                 }
                 ClientAction::ShrinkText(text) => {
                     // shrink text
+                    let text = normalize_keyboard_layout_input(text, &keyboard_layout);
                     raw_input.push_str(&text);
                     raw_input = raw_input
                         .chars()
@@ -540,7 +597,7 @@ impl TextServiceFactory {
 
                     ipc_service.shrink_text(corresponding_count.clone())?;
                     let text = match mode {
-                        InputMode::Kana => normalize_kana_input(text, &symbol_input_style),
+                        InputMode::Kana => normalize_kana_input(&text, &symbol_input_style),
                         InputMode::Latin => text.to_string(),
                     };
                     candidates = ipc_service.append_text(text)?;
@@ -602,7 +659,7 @@ fn candidate_number_to_index(number: i8) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{candidate_number_to_index, normalize_kana_input};
+    use super::{candidate_number_to_index, normalize_kana_input, normalize_keyboard_layout_input};
 
     #[test]
     fn maps_number_keys_to_candidate_indexes() {
@@ -616,5 +673,18 @@ mod tests {
         assert_eq!(normalize_kana_input(",", "japanese"), "、");
         assert_eq!(normalize_kana_input(".", "japanese"), "。");
         assert_eq!(normalize_kana_input(",", "raw"), ",");
+    }
+
+    #[test]
+    fn maps_dvorak_output_to_qwerty_input() {
+        assert_eq!(
+            normalize_keyboard_layout_input("dhtns", "dvorak_qwerty"),
+            "hjkl;"
+        );
+        assert_eq!(
+            normalize_keyboard_layout_input("',.py", "dvorak_qwerty"),
+            "qwert"
+        );
+        assert_eq!(normalize_keyboard_layout_input("abc", "system"), "abc");
     }
 }

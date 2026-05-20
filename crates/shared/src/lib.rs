@@ -109,6 +109,8 @@ pub struct ConversionConfig {
     pub candidate_number_selection: bool,
     #[serde(default = "default_symbol_input_style")]
     pub symbol_input_style: String,
+    #[serde(default = "default_keyboard_layout")]
+    pub keyboard_layout: String,
 }
 
 impl Default for ConversionConfig {
@@ -121,6 +123,7 @@ impl Default for ConversionConfig {
             custom_input_table_path: String::new(),
             candidate_number_selection: default_enabled(),
             symbol_input_style: default_symbol_input_style(),
+            keyboard_layout: default_keyboard_layout(),
         }
     }
 }
@@ -185,6 +188,10 @@ fn default_input_style() -> String {
 
 fn default_symbol_input_style() -> String {
     "japanese".to_string()
+}
+
+fn default_keyboard_layout() -> String {
+    "system".to_string()
 }
 
 impl AppConfig {
