@@ -10,6 +10,7 @@ Push-Location $repo
 try {
     cargo fmt -- --check
     cargo test -p azookey-converter
+    cargo test -p azookey-windows --lib
     cargo check --workspace
     cargo check -p azookey-windows --target x86_64-pc-windows-msvc
 
