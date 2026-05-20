@@ -99,6 +99,8 @@ pub struct ConversionConfig {
     pub input_style: String,
     #[serde(default)]
     pub custom_input_table_path: String,
+    #[serde(default = "default_enabled")]
+    pub candidate_number_selection: bool,
 }
 
 impl Default for ConversionConfig {
@@ -109,6 +111,7 @@ impl Default for ConversionConfig {
             typo_correction: default_enabled(),
             input_style: default_input_style(),
             custom_input_table_path: String::new(),
+            candidate_number_selection: default_enabled(),
         }
     }
 }

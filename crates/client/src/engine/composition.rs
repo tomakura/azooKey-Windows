@@ -92,6 +92,9 @@ impl TextServiceFactory {
         };
 
         let action = UserAction::try_from(wparam.0)?;
+        let candidate_number_selection = shared::AppConfig::read()
+            .conversion
+            .candidate_number_selection;
 
         let (transition, actions) = match composition.state {
             CompositionState::None => match action {
@@ -221,6 +224,12 @@ impl TextServiceFactory {
                         ClientAction::CommitCandidate,
                         ClientAction::ShrinkText(char.to_string()),
                     ],
+                ),
+                UserAction::Number(number) if candidate_number_selection => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetSelection(SetSelectionType::Number(
+                        candidate_number_to_index(number),
+                    ))],
                 ),
                 UserAction::Number(number) => (
                     CompositionState::Composing,
@@ -495,7 +504,9 @@ impl TextServiceFactory {
                     selection_index = match selection {
                         SetSelectionType::Up => max(0, selection_index - 1),
                         SetSelectionType::Down => min(texts.len() as i32 - 1, selection_index + 1),
-                        SetSelectionType::Number(number) => *number,
+                        SetSelectionType::Number(number) => {
+                            min(max(0, *number), texts.len() as i32 - 1)
+                        }
                     };
 
                     ipc_service.set_selection(selection_index as i32)?;
@@ -569,5 +580,25 @@ impl TextServiceFactory {
         composition.corresponding_count = corresponding_count;
 
         Ok(())
+    }
+}
+
+fn candidate_number_to_index(number: i8) -> i32 {
+    match number {
+        0 => 9,
+        1..=9 => number as i32 - 1,
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::candidate_number_to_index;
+
+    #[test]
+    fn maps_number_keys_to_candidate_indexes() {
+        assert_eq!(candidate_number_to_index(1), 0);
+        assert_eq!(candidate_number_to_index(9), 8);
+        assert_eq!(candidate_number_to_index(0), 9);
     }
 }
