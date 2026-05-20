@@ -77,7 +77,6 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                         scroll-snap-type: y proximity;
                         list-style-position: inside;
                         list-style-type: none;
-                        counter-reset: number 0;
                         user-select: none;
                         cursor: pointer;
 
@@ -99,8 +98,7 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                         scroll-snap-align: start;
 
                         &::before {
-                            content: counter(number);
-                            counter-increment: number 1;
+                            content: attr(data-shortcut);
                             color: #636363;
                             font-weight: bold;
                             font-size: 0.75rem;
@@ -181,11 +179,14 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
 
                         candidates.forEach((candidate, index) => {
                             const item = typeof candidate === 'string' ? { text: candidate, subtext: '' } : candidate;
+                            const shortcut = index < 9 ? String(index + 1) : (index === 9 ? '0' : '');
                             if (existingItems[index]) {
+                                existingItems[index].dataset.shortcut = shortcut;
                                 existingItems[index].querySelector('.candidate-text').textContent = item.text;
                                 existingItems[index].querySelector('.candidate-subtext').textContent = item.subtext || '';
                             } else {
                                 const li = document.createElement('li');
+                                li.dataset.shortcut = shortcut;
                                 const text = document.createElement('span');
                                 text.className = 'candidate-text';
                                 text.textContent = item.text;
