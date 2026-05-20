@@ -37,6 +37,13 @@ pub struct ZenzaiConfig {
 }
 
 #[derive(Clone, Debug)]
+pub struct MagicConversionConfig {
+    pub enabled: bool,
+    pub command_path: PathBuf,
+    pub timeout_ms: u64,
+}
+
+#[derive(Clone, Debug)]
 pub struct ConversionConfig {
     pub learning_enabled: bool,
     pub prediction_enabled: bool,
@@ -83,6 +90,16 @@ impl ZenzaiConfig {
     }
 }
 
+impl Default for MagicConversionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            command_path: PathBuf::new(),
+            timeout_ms: 1500,
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 struct Dictionary {
     entries: HashMap<String, Vec<DictionaryEntry>>,
@@ -100,6 +117,8 @@ pub struct NativeConverter {
     zenzai_config: ZenzaiConfig,
     zenzai: ZenzaiEngine,
     input_table: InputTable,
+    magic_conversion_config: MagicConversionConfig,
+    magic_conversion: MagicConversionEngine,
 }
 
 impl Default for NativeConverter {
@@ -119,6 +138,8 @@ impl Default for NativeConverter {
             ),
             zenzai: ZenzaiEngine::default(),
             input_table: InputTable::default(),
+            magic_conversion_config: MagicConversionConfig::default(),
+            magic_conversion: MagicConversionEngine::default(),
         }
     }
 }
@@ -146,6 +167,10 @@ impl NativeConverter {
     pub fn configure_zenzai(&mut self, config: ZenzaiConfig) {
         self.zenzai_config = config;
         self.zenzai.reset();
+    }
+
+    pub fn configure_magic_conversion(&mut self, config: MagicConversionConfig) {
+        self.magic_conversion_config = config;
     }
 
     pub fn configure_conversion(&mut self, config: ConversionConfig) {
@@ -208,6 +233,11 @@ impl NativeConverter {
 
         let mut candidates = self.user_dictionary.lookup_best_prefixes(&self.hiragana);
         candidates.extend(DynamicDictionary::lookup_best_prefixes(&self.hiragana));
+        candidates.extend(self.magic_conversion.candidates(
+            &self.magic_conversion_config,
+            &self.context,
+            &self.hiragana,
+        ));
         candidates.extend(self.emoji_dictionary.lookup_best_prefixes(&self.hiragana));
         if self.conversion_config.learning_enabled {
             candidates.extend(self.learning.lookup_best_prefixes(&self.hiragana));
@@ -413,6 +443,45 @@ fn japanese_weekday(index_from_sunday: usize) -> &'static str {
 #[derive(Default)]
 struct ZenzaiEngine;
 
+#[derive(Default)]
+struct MagicConversionEngine;
+
+impl MagicConversionEngine {
+    fn candidates(
+        &mut self,
+        config: &MagicConversionConfig,
+        context: &str,
+        hiragana: &str,
+    ) -> Vec<Candidate> {
+        if !config.enabled
+            || hiragana.chars().count() < 2
+            || config.command_path.as_os_str().is_empty()
+        {
+            return Vec::new();
+        }
+
+        let Some(output) = run_magic_conversion_command(config, context, hiragana) else {
+            return Vec::new();
+        };
+
+        magic_candidates_from_output(&output, hiragana)
+    }
+}
+
+fn magic_candidates_from_output(output: &str, hiragana: &str) -> Vec<Candidate> {
+    output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(MAX_RETURNED_CANDIDATES)
+        .map(|text| Candidate {
+            text: text.to_string(),
+            subtext: String::new(),
+            corresponding_count: hiragana.chars().count() as i32,
+        })
+        .collect()
+}
+
 impl ZenzaiEngine {
     fn reset(&mut self) {}
 
@@ -456,6 +525,24 @@ impl ZenzaiEngine {
     }
 }
 
+fn run_magic_conversion_command(
+    config: &MagicConversionConfig,
+    context: &str,
+    hiragana: &str,
+) -> Option<String> {
+    let mut child = Command::new(&config.command_path)
+        .arg("--reading")
+        .arg(hiragana)
+        .arg("--context")
+        .arg(context)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+
+    read_child_with_timeout(&mut child, config.timeout_ms)
+}
+
 fn run_zenzai_command(config: &ZenzaiConfig, prompt: String) -> Option<String> {
     let limit = config.inference_limit.max(1);
     let mut child = Command::new(&config.command_path)
@@ -473,8 +560,12 @@ fn run_zenzai_command(config: &ZenzaiConfig, prompt: String) -> Option<String> {
         .spawn()
         .ok()?;
 
+    read_child_with_timeout(&mut child, config.timeout_ms)
+}
+
+fn read_child_with_timeout(child: &mut std::process::Child, timeout_ms: u64) -> Option<String> {
     let started_at = Instant::now();
-    let timeout = Duration::from_millis(config.timeout_ms.max(100));
+    let timeout = Duration::from_millis(timeout_ms.max(100));
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
@@ -1602,6 +1693,15 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|candidate| candidate.text == "2026年5月20日"));
+    }
+
+    #[test]
+    fn magic_conversion_parses_line_based_candidates() {
+        let candidates = magic_candidates_from_output("いい感じの候補\n\n別候補\n", "よみ");
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].text, "いい感じの候補");
+        assert_eq!(candidates[0].corresponding_count, 2);
+        assert_eq!(candidates[1].text, "別候補");
     }
 
     #[test]

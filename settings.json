@@ -9,6 +9,11 @@
         "command_path": "",
         "timeout_ms": 1500
     },
+    "magic_conversion": {
+        "enable": false,
+        "command_path": "",
+        "timeout_ms": 1500
+    },
     "learning": {
         "enable": true
     },

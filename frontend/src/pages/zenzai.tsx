@@ -1,7 +1,7 @@
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import { Bot, User, Cpu, FileCode2, Gauge, SquareTerminal } from "lucide-react";
+import { Bot, User, Cpu, FileCode2, Gauge, SquareTerminal, WandSparkles } from "lucide-react";
 import {
     Select,
     SelectContent,
@@ -56,6 +56,11 @@ export const Zenzai = () => {
         model_path: "",
         command_path: "",
     });
+    const [magicConversion, setMagicConversion] = useState({
+        enable: false,
+        command_path: "",
+        timeout_ms: 1500,
+    });
 
     const [capability, setCapability] = useState({
         cpu: true,
@@ -76,6 +81,12 @@ export const Zenzai = () => {
                     timeout_ms: zenzai.timeout_ms ?? 1500,
                     model_path: zenzai.model_path ?? "",
                     command_path: zenzai.command_path ?? "",
+                });
+                const magic = data.magic_conversion ?? {};
+                setMagicConversion({
+                    enable: magic.enable ?? false,
+                    command_path: magic.command_path ?? "",
+                    timeout_ms: magic.timeout_ms ?? 1500,
                 });
             })
             .catch(() => {
@@ -169,6 +180,37 @@ export const Zenzai = () => {
 
         updateConfig((data) => {
             data.zenzai.timeout_ms = timeout_ms;
+        });
+    };
+
+    const handleMagicConversionChange = async () => {
+        const data = await updateConfig((data) => {
+            data.magic_conversion = data.magic_conversion ?? {};
+            data.magic_conversion.enable = !magicConversion.enable;
+        });
+
+        if (data) {
+            setMagicConversion((prev) => ({ ...prev, enable: data.magic_conversion.enable }));
+        }
+    };
+
+    const handleMagicCommandPathChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const command_path = event.target.value;
+        setMagicConversion((prev) => ({ ...prev, command_path }));
+
+        updateConfig((data) => {
+            data.magic_conversion = data.magic_conversion ?? {};
+            data.magic_conversion.command_path = command_path;
+        });
+    };
+
+    const handleMagicTimeoutChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const timeout_ms = Math.max(100, Number(event.target.value) || 1500);
+        setMagicConversion((prev) => ({ ...prev, timeout_ms }));
+
+        updateConfig((data) => {
+            data.magic_conversion = data.magic_conversion ?? {};
+            data.magic_conversion.timeout_ms = timeout_ms;
         });
     };
 
@@ -274,6 +316,47 @@ export const Zenzai = () => {
                             <ToolTipSelectItem name="Vulkan" value="vulkan" disabled={!capability.vulkan} tooltip="お使いのPCはVulkanに対応していません" />
                         </SelectContent>
                     </Select>
+                </div>
+            </section>
+            <section className="space-y-2">
+                <h1 className="text-sm font-bold text-foreground">いい感じ変換</h1>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <WandSparkles />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            いい感じ変換を有効化
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            読みと文脈を外部コマンドに渡し、返された各行を候補に追加します
+                        </p>
+                    </div>
+                    <Switch checked={magicConversion.enable} onCheckedChange={handleMagicConversionChange} />
+                </div>
+                <div className="space-y-4 rounded-md border p-4">
+                    <div className="flex items-center space-x-4">
+                        <SquareTerminal />
+                        <div className="flex-1 space-y-1">
+                            <p className="text-sm font-medium leading-none">
+                                変換コマンド
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                --reading と --context を受け取り、候補を1行ずつ標準出力へ返す実行ファイル
+                            </p>
+                        </div>
+                    </div>
+                    <Input placeholder="C:\\path\\to\\magic-conversion.exe" value={magicConversion.command_path} disabled={!magicConversion.enable} onChange={handleMagicCommandPathChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Gauge />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            タイムアウト
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            いい感じ変換の応答を待つ最大時間
+                        </p>
+                    </div>
+                    <Input className="w-28" type="number" min={100} step={100} value={magicConversion.timeout_ms} disabled={!magicConversion.enable} onChange={handleMagicTimeoutChange} />
                 </div>
             </section>
         </div>

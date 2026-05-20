@@ -1,5 +1,6 @@
 use azookey_converter::{
-    Candidate as NativeCandidate, ConversionConfig as NativeConversionConfig, NativeConverter,
+    Candidate as NativeCandidate, ConversionConfig as NativeConversionConfig,
+    MagicConversionConfig as NativeMagicConversionConfig, NativeConverter,
     ZenzaiConfig as NativeZenzaiConfig,
 };
 use azookey_server::TonicNamedPipeServer;
@@ -99,6 +100,11 @@ impl MyAzookeyService {
                 profile: config.zenzai.profile,
                 inference_limit: config.zenzai.inference_limit,
                 timeout_ms: config.zenzai.timeout_ms,
+            });
+            converter.configure_magic_conversion(NativeMagicConversionConfig {
+                enabled: config.magic_conversion.enable,
+                command_path: PathBuf::from(config.magic_conversion.command_path),
+                timeout_ms: config.magic_conversion.timeout_ms,
             });
         })
     }

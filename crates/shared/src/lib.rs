@@ -33,6 +33,26 @@ pub struct ZenzaiConfig {
     pub timeout_ms: u64,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct MagicConversionConfig {
+    #[serde(default)]
+    pub enable: bool,
+    #[serde(default)]
+    pub command_path: String,
+    #[serde(default = "default_magic_conversion_timeout_ms")]
+    pub timeout_ms: u64,
+}
+
+impl Default for MagicConversionConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            command_path: String::new(),
+            timeout_ms: default_magic_conversion_timeout_ms(),
+        }
+    }
+}
+
 impl Default for ZenzaiConfig {
     fn default() -> Self {
         ZenzaiConfig {
@@ -94,6 +114,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub zenzai: ZenzaiConfig,
     #[serde(default)]
+    pub magic_conversion: MagicConversionConfig,
+    #[serde(default)]
     pub learning: LearningConfig,
     #[serde(default)]
     pub conversion: ConversionConfig,
@@ -104,6 +126,7 @@ impl Default for AppConfig {
         AppConfig {
             version: default_version(),
             zenzai: ZenzaiConfig::default(),
+            magic_conversion: MagicConversionConfig::default(),
             learning: LearningConfig::default(),
             conversion: ConversionConfig::default(),
         }
@@ -123,6 +146,10 @@ fn default_zenzai_inference_limit() -> usize {
 }
 
 fn default_zenzai_timeout_ms() -> u64 {
+    1500
+}
+
+fn default_magic_conversion_timeout_ms() -> u64 {
     1500
 }
 
