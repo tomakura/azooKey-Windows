@@ -714,15 +714,15 @@ impl Dictionary {
             return;
         };
         for line in BufReader::new(file).lines().map_while(Result::ok) {
-            let mut fields = line.splitn(6, ',');
-            let Some(reading) = fields.next() else {
+            let fields = parse_csv_line(&line);
+            let Some(reading) = fields.first() else {
                 continue;
             };
-            let Some(text) = fields.next() else {
+            let Some(text) = fields.get(1) else {
                 continue;
             };
             let score = fields
-                .nth(3)
+                .get(5)
                 .and_then(|value| value.parse::<f32>().ok())
                 .unwrap_or_default();
 
@@ -899,6 +899,32 @@ impl Dictionary {
             .take(MAX_RETURNED_CANDIDATES)
             .collect()
     }
+}
+
+fn parse_csv_line(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut field = String::new();
+    let mut chars = line.chars().peekable();
+    let mut quoted = false;
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' if quoted && chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            '"' => {
+                quoted = !quoted;
+            }
+            ',' if !quoted => {
+                fields.push(field);
+                field = String::new();
+            }
+            _ => field.push(ch),
+        }
+    }
+    fields.push(field);
+    fields
 }
 
 #[derive(Debug, Default)]
@@ -1641,6 +1667,17 @@ mod tests {
         assert_eq!(roman_to_hiragana("toukyou"), "とうきょう");
         assert_eq!(roman_to_hiragana("gakkou"), "がっこう");
         assert_eq!(roman_to_hiragana("kanji"), "かんじ");
+    }
+
+    #[test]
+    fn parses_quoted_dictionary_csv_fields() {
+        let fields = parse_csv_line(r#"カンジ,"漢,字",1,2,普通名詞,-12.5"#);
+        assert_eq!(fields[0], "カンジ");
+        assert_eq!(fields[1], "漢,字");
+        assert_eq!(fields[5], "-12.5");
+
+        let escaped = parse_csv_line(r#"ヨミ,"候補""A",1,2,普通名詞,-1"#);
+        assert_eq!(escaped[1], "候補\"A");
     }
 
     #[test]
