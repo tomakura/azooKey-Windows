@@ -67,6 +67,8 @@ pub struct ConversionConfig {
     pub live_conversion: bool,
     #[serde(default = "default_enabled")]
     pub prediction: bool,
+    #[serde(default = "default_enabled")]
+    pub typo_correction: bool,
     #[serde(default = "default_input_style")]
     pub input_style: String,
     #[serde(default)]
@@ -78,6 +80,7 @@ impl Default for ConversionConfig {
         ConversionConfig {
             live_conversion: default_enabled(),
             prediction: default_enabled(),
+            typo_correction: default_enabled(),
             input_style: default_input_style(),
             custom_input_table_path: String::new(),
         }

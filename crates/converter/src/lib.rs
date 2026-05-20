@@ -41,6 +41,7 @@ pub struct ConversionConfig {
     pub learning_enabled: bool,
     pub prediction_enabled: bool,
     pub live_conversion_enabled: bool,
+    pub typo_correction_enabled: bool,
     pub input_style: String,
     pub custom_input_table_path: Option<PathBuf>,
 }
@@ -51,6 +52,7 @@ impl Default for ConversionConfig {
             learning_enabled: true,
             prediction_enabled: true,
             live_conversion_enabled: true,
+            typo_correction_enabled: true,
             input_style: "default".to_string(),
             custom_input_table_path: None,
         }
@@ -211,7 +213,14 @@ impl NativeConverter {
             candidates.extend(self.learning.lookup_best_prefixes(&self.hiragana));
         }
         if self.conversion_config.live_conversion_enabled {
-            candidates.extend(self.dictionary.lookup_best_prefixes(&self.hiragana));
+            let dictionary_candidates = self.dictionary.lookup_best_prefixes(&self.hiragana);
+            let has_full_dictionary_match = dictionary_candidates.iter().any(|candidate| {
+                candidate.corresponding_count as usize == self.hiragana.chars().count()
+            });
+            candidates.extend(dictionary_candidates);
+            if self.conversion_config.typo_correction_enabled && !has_full_dictionary_match {
+                candidates.extend(self.dictionary.lookup_typo_corrections(&self.hiragana));
+            }
         }
         if self.conversion_config.prediction_enabled {
             candidates.extend(self.user_dictionary.lookup_predictions(&self.hiragana));
@@ -585,6 +594,40 @@ impl Dictionary {
             .entries
             .iter()
             .filter(|(reading, _)| reading.starts_with(hiragana) && reading.as_str() != hiragana)
+            .flat_map(|(_, entries)| entries.iter())
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| left.text.cmp(&right.text))
+        });
+
+        entries
+            .into_iter()
+            .map(|entry| Candidate {
+                text: entry.text.clone(),
+                subtext: String::new(),
+                corresponding_count: length as i32,
+            })
+            .take(MAX_RETURNED_CANDIDATES)
+            .collect()
+    }
+
+    fn lookup_typo_corrections(&self, hiragana: &str) -> Vec<Candidate> {
+        let length = hiragana.chars().count();
+        if length < 3 {
+            return Vec::new();
+        }
+
+        let first = hiragana.chars().next();
+        let mut entries = self
+            .entries
+            .iter()
+            .filter(|(reading, _)| {
+                reading.chars().next() == first && is_edit_distance_one_or_less(reading, hiragana)
+            })
             .flat_map(|(_, entries)| entries.iter())
             .collect::<Vec<_>>();
         entries.sort_by(|left, right| {
@@ -982,6 +1025,43 @@ fn katakana_to_hiragana(value: &str) -> String {
         .collect()
 }
 
+fn is_edit_distance_one_or_less(left: &str, right: &str) -> bool {
+    let left = left.chars().collect::<Vec<_>>();
+    let right = right.chars().collect::<Vec<_>>();
+    let left_len = left.len();
+    let right_len = right.len();
+    if left_len.abs_diff(right_len) > 1 {
+        return false;
+    }
+
+    let mut left_index = 0;
+    let mut right_index = 0;
+    let mut edits = 0;
+    while left_index < left_len && right_index < right_len {
+        if left[left_index] == right[right_index] {
+            left_index += 1;
+            right_index += 1;
+            continue;
+        }
+
+        edits += 1;
+        if edits > 1 {
+            return false;
+        }
+
+        match left_len.cmp(&right_len) {
+            std::cmp::Ordering::Greater => left_index += 1,
+            std::cmp::Ordering::Less => right_index += 1,
+            std::cmp::Ordering::Equal => {
+                left_index += 1;
+                right_index += 1;
+            }
+        }
+    }
+
+    edits + usize::from(left_index < left_len || right_index < right_len) <= 1
+}
+
 pub fn roman_to_hiragana(input: &str) -> String {
     roman_to_hiragana_with_entries(input, &InputTable::standard().entries)
 }
@@ -1331,6 +1411,32 @@ mod tests {
         assert_eq!(roman_to_hiragana_with_entries("ki", &table.entries), "き");
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn typo_correction_uses_nearby_dictionary_readings() {
+        let mut entries = HashMap::new();
+        entries.insert(
+            "かんじ".to_string(),
+            vec![DictionaryEntry {
+                text: "漢字".to_string(),
+                score: 10.0,
+            }],
+        );
+        let mut converter = NativeConverter {
+            dictionary: Dictionary { entries },
+            ..Default::default()
+        };
+
+        let candidates = converter.append_text("kanhi");
+        assert!(candidates.iter().any(|candidate| candidate.text == "漢字"));
+
+        converter.configure_conversion(ConversionConfig {
+            typo_correction_enabled: false,
+            ..Default::default()
+        });
+        let candidates = converter.candidates();
+        assert!(!candidates.iter().any(|candidate| candidate.text == "漢字"));
     }
 
     #[test]

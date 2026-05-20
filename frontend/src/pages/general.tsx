@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { invoke } from "@tauri-apps/api/core";
-import { BrainCircuit, ExternalLink, Keyboard, Lightbulb, RefreshCcw, Trash2, WandSparkles } from "lucide-react";
+import { BrainCircuit, ExternalLink, Keyboard, Lightbulb, RefreshCcw, SpellCheck, Trash2, WandSparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
@@ -12,6 +12,7 @@ export const General = () => {
         learning: true,
         live_conversion: true,
         prediction: true,
+        typo_correction: true,
         input_style: "default",
         custom_input_table_path: "",
     });
@@ -23,6 +24,7 @@ export const General = () => {
                     learning: data.learning?.enable ?? true,
                     live_conversion: data.conversion?.live_conversion ?? true,
                     prediction: data.conversion?.prediction ?? true,
+                    typo_correction: data.conversion?.typo_correction ?? true,
                     input_style: data.conversion?.input_style ?? "default",
                     custom_input_table_path: data.conversion?.custom_input_table_path ?? "",
                 });
@@ -71,6 +73,16 @@ export const General = () => {
         });
         if (data) {
             setValue((prev) => ({ ...prev, prediction }));
+        }
+    };
+
+    const handleTypoCorrectionChange = async (typo_correction: boolean) => {
+        const data = await updateConfig((data) => {
+            data.conversion = data.conversion ?? {};
+            data.conversion.typo_correction = typo_correction;
+        });
+        if (data) {
+            setValue((prev) => ({ ...prev, typo_correction }));
         }
     };
 
@@ -128,6 +140,18 @@ export const General = () => {
                         </p>
                     </div>
                     <Switch checked={value.prediction} onCheckedChange={handlePredictionChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <SpellCheck />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            typo correction
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            1文字違いの読みから候補を補正します
+                        </p>
+                    </div>
+                    <Switch checked={value.typo_correction} onCheckedChange={handleTypoCorrectionChange} />
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <Keyboard />

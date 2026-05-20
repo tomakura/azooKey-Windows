@@ -15,6 +15,7 @@
     "conversion": {
         "live_conversion": true,
         "prediction": true,
+        "typo_correction": true,
         "input_style": "default",
         "custom_input_table_path": ""
     }
