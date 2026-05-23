@@ -40,16 +40,14 @@ fn start_process(exe: &str, prefix: &str) -> Option<Child> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect(&format!("Failed to start {}", exe));
+        .unwrap_or_else(|_| panic!("Failed to start {}", exe));
 
     let stdout = child.stdout.take().expect("Failed to capture stdout");
     let stdout_reader = BufReader::new(stdout);
     let prefix_stdout = prefix.to_string();
     thread::spawn(move || {
-        for line in stdout_reader.lines() {
-            if let Ok(line) = line {
-                println!("{}: {}", prefix_stdout, line);
-            }
+        for line in stdout_reader.lines().map_while(Result::ok) {
+            println!("{}: {}", prefix_stdout, line);
         }
     });
 
@@ -57,10 +55,8 @@ fn start_process(exe: &str, prefix: &str) -> Option<Child> {
     let stderr_reader = BufReader::new(stderr);
     let prefix_stderr = prefix.to_string();
     thread::spawn(move || {
-        for line in stderr_reader.lines() {
-            if let Ok(line) = line {
-                eprintln!("{}: {}", prefix_stderr, line);
-            }
+        for line in stderr_reader.lines().map_while(Result::ok) {
+            eprintln!("{}: {}", prefix_stderr, line);
         }
     });
 

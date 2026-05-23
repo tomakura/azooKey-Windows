@@ -18,7 +18,7 @@ fn main() {
                 format!("{}/service.proto", project_dir),
                 format!("{}/window.proto", project_dir),
             ],
-            &[format!("{}", project_dir)],
+            &[project_dir.to_string()],
         )
         .unwrap();
 }

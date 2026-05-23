@@ -152,10 +152,10 @@ impl Default for NativeConverter {
                 PathBuf::from(DEFAULT_ZENZAI_MODEL),
                 PathBuf::from(DEFAULT_ZENZAI_COMMAND),
             ),
-            zenzai: ZenzaiEngine::default(),
+            zenzai: ZenzaiEngine,
             input_table: InputTable::default(),
             magic_conversion_config: MagicConversionConfig::default(),
-            magic_conversion: MagicConversionEngine::default(),
+            magic_conversion: MagicConversionEngine,
         }
     }
 }

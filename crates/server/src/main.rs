@@ -49,6 +49,7 @@ impl MyAzookeyService {
         }
     }
 
+    #[allow(clippy::result_large_err)]
     fn with_converter<T>(
         &self,
         update: impl FnOnce(&mut NativeConverter) -> T,
@@ -60,6 +61,7 @@ impl MyAzookeyService {
         Ok(update(&mut converter))
     }
 
+    #[allow(clippy::result_large_err)]
     fn apply_config(&self) -> Result<(), Status> {
         let config = shared::AppConfig::new();
         let model_path = if config.zenzai.model_path.trim().is_empty() {
@@ -189,8 +191,7 @@ impl AzookeyService for MyAzookeyService {
         let context = request.into_inner().context;
         let trimmed_context = context
             .split('\r')
-            .filter(|s| !s.is_empty())
-            .next_back()
+            .rfind(|s| !s.is_empty())
             .unwrap_or_default()
             .to_string();
 

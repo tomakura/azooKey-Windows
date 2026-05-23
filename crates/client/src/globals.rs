@@ -105,6 +105,6 @@ impl DllModule {
 
     #[allow(dead_code)]
     pub fn can_unload(&self) -> bool {
-        self.ref_count.load(Ordering::SeqCst) <= 0
+        self.ref_count.load(Ordering::SeqCst) == 0
     }
 }

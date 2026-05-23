@@ -14,6 +14,13 @@ impl WindowController {
     pub fn new(sender: mpsc::Sender<WindowAction>) -> Self {
         Self { sender }
     }
+
+    async fn send(&self, action: WindowAction) -> Result<(), Status> {
+        self.sender
+            .send(action)
+            .await
+            .map_err(|_| Status::unavailable("window event loop is closed"))
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -53,11 +60,7 @@ impl WindowServiceProto for WindowService {
         &self,
         _request: Request<EmptyResponse>,
     ) -> Result<Response<EmptyResponse>, Status> {
-        self.controller
-            .sender
-            .send(WindowAction::Show)
-            .await
-            .unwrap();
+        self.controller.send(WindowAction::Show).await?;
         Ok(Response::new(EmptyResponse {}))
     }
 
@@ -65,32 +68,29 @@ impl WindowServiceProto for WindowService {
         &self,
         _request: Request<EmptyResponse>,
     ) -> Result<Response<EmptyResponse>, Status> {
-        self.controller
-            .sender
-            .send(WindowAction::Hide)
-            .await
-            .unwrap();
+        self.controller.send(WindowAction::Hide).await?;
         Ok(Response::new(EmptyResponse {}))
     }
     async fn set_window_position(
         &self,
         request: Request<SetPositionRequest>,
     ) -> Result<Response<EmptyResponse>, Status> {
-        let position = request.into_inner().position.unwrap();
+        let position = request
+            .into_inner()
+            .position
+            .ok_or_else(|| Status::invalid_argument("position is required"))?;
         let top = position.top;
         let left = position.left;
         let bottom = position.bottom;
         let right = position.right;
         self.controller
-            .sender
             .send(WindowAction::SetPosition {
                 top,
                 left,
                 bottom,
                 right,
             })
-            .await
-            .unwrap();
+            .await?;
 
         Ok(Response::new(EmptyResponse {}))
     }
@@ -121,10 +121,8 @@ impl WindowServiceProto for WindowService {
         };
 
         self.controller
-            .sender
             .send(WindowAction::SetCandidate { candidates })
-            .await
-            .unwrap();
+            .await?;
 
         Ok(Response::new(EmptyResponse {}))
     }
@@ -135,10 +133,8 @@ impl WindowServiceProto for WindowService {
     ) -> Result<Response<EmptyResponse>, Status> {
         let index = request.into_inner().index;
         self.controller
-            .sender
             .send(WindowAction::SetSelection { index })
-            .await
-            .unwrap();
+            .await?;
 
         Ok(Response::new(EmptyResponse {}))
     }
@@ -149,10 +145,8 @@ impl WindowServiceProto for WindowService {
     ) -> Result<Response<EmptyResponse>, Status> {
         let mode = request.into_inner().mode;
         self.controller
-            .sender
             .send(WindowAction::SetInputMode(mode))
-            .await
-            .unwrap();
+            .await?;
 
         Ok(Response::new(EmptyResponse {}))
     }

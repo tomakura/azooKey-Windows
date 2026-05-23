@@ -251,8 +251,7 @@ async fn main() -> anyhow::Result<()> {
                                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
                                 );
                             }
-                            candidate_window
-                                .set_outer_position(PhysicalPosition::new(x as f64, y as f64));
+                            candidate_window.set_outer_position(PhysicalPosition::new(x, y));
                             indicator_window.set_outer_position(PhysicalPosition::new(
                                 (left - 45) as f64,
                                 bottom as f64,

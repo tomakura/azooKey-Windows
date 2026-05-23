@@ -106,7 +106,7 @@ impl TextServiceFactory {
         let factory = unsafe { this.as_impl() };
         factory.borrow_mut()?.this = Some(this.clone());
 
-        unsafe { factory.cast::<I>().map_err(|e| anyhow::Error::new(e)) }
+        unsafe { factory.cast::<I>().map_err(anyhow::Error::new) }
     }
 
     pub fn borrow_mut(&self) -> Result<RefMut<'_, TextService>> {
