@@ -58,7 +58,7 @@ pub extern "system" fn DllMain(
             dll_instance.hinst = None;
             // send a signal to the tracing writer thread to exit
             if let Some(sender) = dll_instance.sender.take() {
-                sender.send(true).unwrap();
+                let _ = sender.send(true);
             }
 
             Ok(())

@@ -1,12 +1,16 @@
 use shared::AppConfig;
 use std::io::{BufRead, BufReader};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::{env, thread};
 
 fn main() -> anyhow::Result<()> {
     let config = AppConfig::new();
 
-    let exe_path = env::current_exe()?.parent().unwrap().to_path_buf();
+    let exe_path = env::current_exe()?
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Failed to resolve launcher directory"))?
+        .to_path_buf();
     let backend_dir = match config.zenzai.backend.as_str() {
         "cpu" => "llama_cpu",
         "cuda" => "llama_cuda",
@@ -21,28 +25,39 @@ fn main() -> anyhow::Result<()> {
     new_path = format!("{};{}", backend_path_str, new_path);
     env::set_var("PATH", &new_path);
 
-    let server_process = start_process("azookey-server.exe", "[server]");
-    let ui_process = start_process("ui.exe", "[ui]");
+    let mut server_process = start_process(&exe_path, "azookey-server.exe", "[server]")?;
+    let ui_process = match start_process(&exe_path, "ui.exe", "[ui]") {
+        Ok(process) => process,
+        Err(error) => {
+            let _ = server_process.kill();
+            let _ = server_process.wait();
+            return Err(error);
+        }
+    };
 
-    if let (Some(mut server), Some(mut ui)) = (server_process, ui_process) {
-        let server_handle = thread::spawn(move || server.wait());
-        let ui_handle = thread::spawn(move || ui.wait());
+    let mut server = server_process;
+    let mut ui = ui_process;
+    let server_handle = thread::spawn(move || server.wait());
+    let ui_handle = thread::spawn(move || ui.wait());
 
-        let _ = server_handle.join();
-        let _ = ui_handle.join();
-    }
+    let _ = server_handle.join();
+    let _ = ui_handle.join();
 
     Ok(())
 }
 
-fn start_process(exe: &str, prefix: &str) -> Option<Child> {
-    let mut child = Command::new(exe)
+fn start_process(exe_dir: &Path, exe: &str, prefix: &str) -> anyhow::Result<Child> {
+    let exe_path = exe_dir.join(exe);
+    let mut child = Command::new(&exe_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .unwrap_or_else(|_| panic!("Failed to start {}", exe));
+        .map_err(|error| anyhow::anyhow!("Failed to start {}: {}", exe_path.display(), error))?;
 
-    let stdout = child.stdout.take().expect("Failed to capture stdout");
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("Failed to capture stdout for {}", exe))?;
     let stdout_reader = BufReader::new(stdout);
     let prefix_stdout = prefix.to_string();
     thread::spawn(move || {
@@ -51,7 +66,10 @@ fn start_process(exe: &str, prefix: &str) -> Option<Child> {
         }
     });
 
-    let stderr = child.stderr.take().expect("Failed to capture stderr");
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("Failed to capture stderr for {}", exe))?;
     let stderr_reader = BufReader::new(stderr);
     let prefix_stderr = prefix.to_string();
     thread::spawn(move || {
@@ -60,5 +78,5 @@ fn start_process(exe: &str, prefix: &str) -> Option<Child> {
         }
     });
 
-    Some(child)
+    Ok(child)
 }
