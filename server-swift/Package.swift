@@ -3,10 +3,10 @@
 
 import PackageDescription
 
-// Stage 1 keeps the converter dependency trait-free so the Windows server can
-// build without requiring a local llama system library. Zenzai linking is a
-// separate packaging step because the Windows fork ships selectable backends.
-let kanaKanjiConverterTraits: Set<Package.Dependency.Trait> = []
+// Zenzai requires a local llama.lib/llama.dll built from the ensan-hcl/llama.cpp
+// fork (branch ku-nlp/gpt2-japanese-char); llama.lib is vendored next to this
+// Package.swift per AzooKeyKanaKanjiConverter/Docs/about_windows_support.md.
+let kanaKanjiConverterTraits: Set<Package.Dependency.Trait> = ["Zenzai"]
 
 let package = Package(
     name: "azookey-server",
@@ -37,7 +37,8 @@ let package = Package(
             dependencies: [
                 .product(name: "KanaKanjiConverterModule", package: "AzooKeyKanaKanjiConverter"),
                 "ffi"
-            ]
+            ],
+            swiftSettings: [.interoperabilityMode(.Cxx)]
         ),
         .testTarget(
             name: "azookey-serverTests",

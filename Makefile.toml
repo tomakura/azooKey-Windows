@@ -6,6 +6,24 @@ default_to_workspace = false
 command = "cargo"
 args = ["fmt"]
 
+[tasks.build_swift]
+description = "Build the swift converter"
+script_runner = "powershell"
+script_extension = "ps1"
+script = """
+$swiftBin = Join-Path $env:LOCALAPPDATA "Programs\\Swift\\Toolchains\\6.3.2+Asserts\\usr\\bin"
+if ((Test-Path $swiftBin) -and -not (Get-Command swift -ErrorAction SilentlyContinue)) {
+    $env:Path = "$swiftBin;$env:Path"
+}
+Push-Location server-swift
+try {
+    swift build -c release
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} finally {
+    Pop-Location
+}
+"""
+
 [tasks.build_x64]
 command = "cargo"
 args = ["build", "${@}"]
@@ -55,9 +73,19 @@ cp target/$str/ui.exe build
 cp target/$str/azookey-server.exe build
 cp target/$str/azookey_windows.dll build
 cp target/$str/launcher.exe build
+cp target/$str/frontend.exe build/azookey_settings.exe
 
 
 cp target/i686-pc-windows-msvc/$str/azookey_windows.dll build/x86
+
+cp server-swift/.build/x86_64-unknown-windows-msvc/release/azookey-server.dll build
+
+$swiftRuntimes = Join-Path $env:LOCALAPPDATA "Programs/Swift/Runtimes"
+if (Test-Path $swiftRuntimes) {
+    Get-ChildItem $swiftRuntimes -Directory | Sort-Object Name | Select-Object -Last 1 | ForEach-Object {
+        cp (Join-Path $_.FullName "usr/bin/*") build
+    }
+}
 
 if (Test-Path llama_cpu) { cp -Recurse -Force llama_cpu build }
 if (Test-Path llama_cuda) { cp -Recurse -Force llama_cuda build }
@@ -79,11 +107,24 @@ icacls build/azookey_windows.dll /grant "*S-1-15-2-1:(RX)"
 icacls build/x86/azookey_windows.dll /grant "*S-1-15-2-1:(RX)"
 """
 
+[tasks.dev_reload]
+description = "Hot-reload Azookey without system restart (run dev-reload.ps1)"
+script_runner = "powershell"
+script_extension = "ps1"
+script = """
+& (Join-Path $env:CARGO_MAKE_WORKING_DIRECTORY "dev-reload.ps1")
+"""
+
+[tasks.dev]
+description = "Build x64 only and hot-reload (fast dev cycle, no installer needed)"
+dependencies = ["build_swift", "build_x64", "dev_reload"]
+
 [tasks.build]
 clear = true
 description = "Run the flow"
 dependencies = [
     "format",
+    "build_swift",
     "build_x64",
     "build_x86",
     "build_tauri",

@@ -63,7 +63,6 @@ import ffi
         return .off
     }
 
-    #if Zenzai || ZenzaiCPU
     let profile = (config["profile"] as? String) ?? ""
     return .on(
         weight: execURL.appendingPathComponent("zenz.gguf", isDirectory: false),
@@ -78,9 +77,6 @@ import ffi
             )
         )
     )
-    #else
-    return .off
-    #endif
 }
 
 @MainActor func getOptions(context: String = "") -> ConvertRequestOptions {

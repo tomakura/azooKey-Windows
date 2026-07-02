@@ -1,13 +1,4 @@
-use azookey_converter::{
-    Candidate as NativeCandidate, ConversionConfig as NativeConversionConfig,
-    MagicConversionConfig as NativeMagicConversionConfig, NativeConverter,
-    ZenzaiConfig as NativeZenzaiConfig,
-};
 use azookey_server::TonicNamedPipeServer;
-use std::{
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
-};
 use tonic::{transport::Server, Request, Response, Status};
 use tonic_reflection::server::Builder as ReflectionBuilder;
 
@@ -19,103 +10,120 @@ use shared::proto::{
     ShrinkTextResponse, Suggestion,
 };
 
-fn response_from_parts(hiragana: String, candidates: Vec<NativeCandidate>) -> ComposingText {
-    let suggestions = candidates
-        .into_iter()
-        .map(|candidate| Suggestion {
-            text: candidate.text,
-            subtext: candidate.subtext,
-            corresponding_count: candidate.corresponding_count,
-        })
-        .collect();
+use std::ffi::{c_char, c_int, CStr, CString};
+use std::sync::Mutex;
 
+const USE_ZENZAI: bool = true;
+
+#[derive(Debug, Clone)]
+#[repr(C)]
+struct FFICandidate {
+    text: *mut c_char,
+    subtext: *mut c_char,
+    hiragana: *mut c_char,
+    corresponding_count: c_int,
+}
+
+unsafe extern "C" {
+    fn Initialize(path: *const c_char, use_zenzai: bool);
+    fn SetContext(context: *const c_char);
+    fn AppendText(input: *const c_char, cursorPtr: *mut c_int) -> *mut c_char;
+    fn RemoveText(cursorPtr: *mut c_int) -> *mut c_char;
+    fn MoveCursor(offset: c_int, cursorPtr: *mut c_int) -> *mut c_char;
+    fn ShrinkText(offset: c_int) -> *mut c_char;
+    fn ClearText();
+    fn GetComposedText(lengthPtr: *mut c_int) -> *mut *mut FFICandidate;
+    fn LoadConfig();
+}
+
+// The Swift engine keeps global state, so serialize all FFI access.
+static ENGINE_LOCK: Mutex<()> = Mutex::new(());
+
+fn with_engine<T>(action: impl FnOnce() -> T) -> T {
+    let _guard = ENGINE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    action()
+}
+
+fn initialize(path: &str) {
+    let path = CString::new(path).expect("CString::new failed");
+    with_engine(|| unsafe { Initialize(path.as_ptr(), USE_ZENZAI) });
+}
+
+fn add_text(input: &str) -> String {
+    let input = CString::new(input).unwrap_or_default();
+    with_engine(|| unsafe {
+        let mut cursor: c_int = 0;
+        let result = AppendText(input.as_ptr(), &mut cursor);
+        CStr::from_ptr(result).to_string_lossy().into_owned()
+    })
+}
+
+fn move_cursor(offset: i32) -> String {
+    with_engine(|| unsafe {
+        let mut cursor: c_int = 0;
+        let result = MoveCursor(offset, &mut cursor);
+        CStr::from_ptr(result).to_string_lossy().into_owned()
+    })
+}
+
+fn remove_text() -> String {
+    with_engine(|| unsafe {
+        let mut cursor: c_int = 0;
+        let result = RemoveText(&mut cursor);
+        CStr::from_ptr(result).to_string_lossy().into_owned()
+    })
+}
+
+fn clear_text() {
+    with_engine(|| unsafe { ClearText() });
+}
+
+fn shrink_text(offset: i32) -> String {
+    with_engine(|| unsafe {
+        let result = ShrinkText(offset);
+        CStr::from_ptr(result).to_string_lossy().into_owned()
+    })
+}
+
+fn get_composed_text() -> Vec<Suggestion> {
+    with_engine(|| unsafe {
+        let mut length: c_int = 0;
+        let result = GetComposedText(&mut length);
+        let mut suggestions: Vec<Suggestion> = Vec::with_capacity(length as usize);
+
+        for index in 0..length as usize {
+            let candidate = (**result.add(index)).clone();
+            let text = CStr::from_ptr(candidate.text)
+                .to_string_lossy()
+                .into_owned();
+            let subtext = CStr::from_ptr(candidate.subtext)
+                .to_string_lossy()
+                .into_owned();
+            let corresponding_count = candidate.corresponding_count;
+
+            if suggestions.iter().any(|s| s.text == text) {
+                continue;
+            }
+            suggestions.push(Suggestion {
+                text,
+                subtext,
+                corresponding_count,
+            });
+        }
+
+        suggestions
+    })
+}
+
+fn composing_text_response(hiragana: String) -> ComposingText {
     ComposingText {
         hiragana,
-        suggestions,
+        suggestions: get_composed_text(),
     }
 }
 
-#[derive(Clone)]
-pub struct MyAzookeyService {
-    converter: Arc<Mutex<NativeConverter>>,
-    resource_dir: Arc<PathBuf>,
-}
-
-impl MyAzookeyService {
-    fn new(converter: NativeConverter, resource_dir: PathBuf) -> Self {
-        Self {
-            converter: Arc::new(Mutex::new(converter)),
-            resource_dir: Arc::new(resource_dir),
-        }
-    }
-
-    #[allow(clippy::result_large_err)]
-    fn with_converter<T>(
-        &self,
-        update: impl FnOnce(&mut NativeConverter) -> T,
-    ) -> Result<T, Status> {
-        let mut converter = self
-            .converter
-            .lock()
-            .map_err(|_| Status::internal("converter mutex poisoned"))?;
-        Ok(update(&mut converter))
-    }
-
-    #[allow(clippy::result_large_err)]
-    fn apply_config(&self) -> Result<(), Status> {
-        let config = shared::AppConfig::new();
-        let model_path = if config.zenzai.model_path.trim().is_empty() {
-            self.resource_dir.join("zenz.gguf")
-        } else {
-            PathBuf::from(&config.zenzai.model_path)
-        };
-        let command_path = if config.zenzai.command_path.trim().is_empty() {
-            PathBuf::from("llama-cli.exe")
-        } else {
-            PathBuf::from(&config.zenzai.command_path)
-        };
-
-        self.with_converter(|converter| {
-            converter.reload_user_dictionary();
-            converter.reload_learning();
-            converter.configure_conversion(NativeConversionConfig {
-                learning_enabled: config.learning.enable,
-                prediction_enabled: config.conversion.prediction,
-                live_conversion_enabled: config.conversion.live_conversion,
-                typo_correction_enabled: config.conversion.typo_correction,
-                dynamic_candidates_enabled: config.conversion.dynamic_candidates,
-                input_style: config.conversion.input_style,
-                custom_input_table_path: if config
-                    .conversion
-                    .custom_input_table_path
-                    .trim()
-                    .is_empty()
-                {
-                    None
-                } else {
-                    Some(PathBuf::from(config.conversion.custom_input_table_path))
-                },
-            });
-            converter.configure_zenzai(NativeZenzaiConfig {
-                enabled: config.zenzai.enable,
-                model_path,
-                command_path,
-                profile: config.zenzai.profile,
-                personalization_enabled: config.zenzai.personalization,
-                personalization_path: PathBuf::from(config.zenzai.personalization_path),
-                inference_limit: config.zenzai.inference_limit,
-                timeout_ms: config.zenzai.timeout_ms,
-                prediction_enabled: config.zenzai.prediction,
-                prediction_token_limit: config.zenzai.prediction_token_limit,
-            });
-            converter.configure_magic_conversion(NativeMagicConversionConfig {
-                enabled: config.magic_conversion.enable,
-                command_path: PathBuf::from(config.magic_conversion.command_path),
-                timeout_ms: config.magic_conversion.timeout_ms,
-            });
-        })
-    }
-}
+#[derive(Debug, Default)]
+pub struct MyAzookeyService;
 
 #[tonic::async_trait]
 impl AzookeyService for MyAzookeyService {
@@ -124,13 +132,10 @@ impl AzookeyService for MyAzookeyService {
         request: Request<AppendTextRequest>,
     ) -> Result<Response<AppendTextResponse>, Status> {
         let input = request.into_inner().text_to_append;
-        let composing_text = self.with_converter(|converter| {
-            let candidates = converter.append_text(&input);
-            response_from_parts(converter.hiragana().to_string(), candidates)
-        })?;
+        let hiragana = add_text(&input);
 
         Ok(Response::new(AppendTextResponse {
-            composing_text: Some(composing_text),
+            composing_text: Some(composing_text_response(hiragana)),
         }))
     }
 
@@ -138,26 +143,22 @@ impl AzookeyService for MyAzookeyService {
         &self,
         _: Request<RemoveTextRequest>,
     ) -> Result<Response<RemoveTextResponse>, Status> {
-        let composing_text = self.with_converter(|converter| {
-            let candidates = converter.remove_text();
-            response_from_parts(converter.hiragana().to_string(), candidates)
-        })?;
+        let hiragana = remove_text();
 
         Ok(Response::new(RemoveTextResponse {
-            composing_text: Some(composing_text),
+            composing_text: Some(composing_text_response(hiragana)),
         }))
     }
 
     async fn move_cursor(
         &self,
-        _: Request<MoveCursorRequest>,
+        request: Request<MoveCursorRequest>,
     ) -> Result<Response<MoveCursorResponse>, Status> {
-        let composing_text = self.with_converter(|converter| {
-            response_from_parts(converter.hiragana().to_string(), converter.candidates())
-        })?;
+        let offset = request.into_inner().offset;
+        let hiragana = move_cursor(offset);
 
         Ok(Response::new(MoveCursorResponse {
-            composing_text: Some(composing_text),
+            composing_text: Some(composing_text_response(hiragana)),
         }))
     }
 
@@ -165,7 +166,7 @@ impl AzookeyService for MyAzookeyService {
         &self,
         _: Request<ClearTextRequest>,
     ) -> Result<Response<ClearTextResponse>, Status> {
-        self.with_converter(|converter| converter.clear_text())?;
+        clear_text();
         Ok(Response::new(ClearTextResponse {}))
     }
 
@@ -174,13 +175,10 @@ impl AzookeyService for MyAzookeyService {
         request: Request<ShrinkTextRequest>,
     ) -> Result<Response<ShrinkTextResponse>, Status> {
         let offset = request.into_inner().offset;
-        let composing_text = self.with_converter(|converter| {
-            let candidates = converter.shrink_text(offset);
-            response_from_parts(converter.hiragana().to_string(), candidates)
-        })?;
+        let hiragana = shrink_text(offset);
 
         Ok(Response::new(ShrinkTextResponse {
-            composing_text: Some(composing_text),
+            composing_text: Some(composing_text_response(hiragana)),
         }))
     }
 
@@ -195,7 +193,8 @@ impl AzookeyService for MyAzookeyService {
             .unwrap_or_default()
             .to_string();
 
-        self.with_converter(|converter| converter.set_context(trimmed_context))?;
+        let context = CString::new(trimmed_context).unwrap_or_default();
+        with_engine(|| unsafe { SetContext(context.as_ptr()) });
         Ok(Response::new(shared::proto::SetContextResponse {}))
     }
 
@@ -203,16 +202,15 @@ impl AzookeyService for MyAzookeyService {
         &self,
         _: Request<shared::proto::UpdateConfigRequest>,
     ) -> Result<Response<shared::proto::UpdateConfigResponse>, Status> {
-        self.apply_config()?;
+        with_engine(|| unsafe { LoadConfig() });
         Ok(Response::new(shared::proto::UpdateConfigResponse {}))
     }
 
     async fn commit_candidate(
         &self,
-        request: Request<CommitCandidateRequest>,
+        _: Request<CommitCandidateRequest>,
     ) -> Result<Response<CommitCandidateResponse>, Status> {
-        let request = request.into_inner();
-        self.with_converter(|converter| converter.record_commit(&request.reading, &request.text))?;
+        // The Swift converter does not expose learning yet; accept and ignore.
         Ok(Response::new(CommitCandidateResponse {}))
     }
 }
@@ -221,13 +219,12 @@ impl AzookeyService for MyAzookeyService {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("AzookeyServer started");
     let current_exe = std::env::current_exe()?;
-    let resource_dir = current_exe
+    let parent_dir = current_exe
         .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
-    let converter = NativeConverter::load(&resource_dir);
-    let service = MyAzookeyService::new(converter, resource_dir);
-    service.apply_config()?;
+        .ok_or("Failed to resolve server directory")?;
+    initialize(&parent_dir.to_string_lossy());
+
+    let service = MyAzookeyService;
 
     println!("AzookeyServer listening");
 
