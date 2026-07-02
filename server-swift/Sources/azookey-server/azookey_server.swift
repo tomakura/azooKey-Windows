@@ -211,6 +211,11 @@ func constructCandidateString(candidate: Candidate, hiragana _: String) -> Strin
     converter?.stopComposition()
 }
 
+@_silgen_name("ResetLearning")
+@MainActor public func reset_learning() {
+    converter?.resetMemory()
+}
+
 func to_list_pointer(_ list: [FFICandidate]) -> UnsafeMutablePointer<UnsafeMutablePointer<FFICandidate>?> {
     let pointer = UnsafeMutablePointer<UnsafeMutablePointer<FFICandidate>?>.allocate(capacity: list.count)
     for (i, item) in list.enumerated() {

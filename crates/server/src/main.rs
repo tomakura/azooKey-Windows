@@ -6,8 +6,8 @@ use shared::proto::azookey_service_server::{AzookeyService, AzookeyServiceServer
 use shared::proto::{
     AppendTextRequest, AppendTextResponse, ClearTextRequest, ClearTextResponse,
     CommitCandidateRequest, CommitCandidateResponse, ComposingText, MoveCursorRequest,
-    MoveCursorResponse, RemoveTextRequest, RemoveTextResponse, ShrinkTextRequest,
-    ShrinkTextResponse, Suggestion,
+    MoveCursorResponse, RemoveTextRequest, RemoveTextResponse, ResetLearningRequest,
+    ResetLearningResponse, ShrinkTextRequest, ShrinkTextResponse, Suggestion,
 };
 
 use std::ffi::{c_char, c_int, CStr, CString};
@@ -34,6 +34,7 @@ unsafe extern "C" {
     fn ClearText();
     fn GetComposedText(lengthPtr: *mut c_int) -> *mut *mut FFICandidate;
     fn LoadConfig();
+    fn ResetLearning();
 }
 
 // The Swift engine keeps global state, so serialize all FFI access.
@@ -76,6 +77,10 @@ fn remove_text() -> String {
 
 fn clear_text() {
     with_engine(|| unsafe { ClearText() });
+}
+
+fn reset_learning() {
+    with_engine(|| unsafe { ResetLearning() });
 }
 
 fn shrink_text(offset: i32) -> String {
@@ -210,8 +215,16 @@ impl AzookeyService for MyAzookeyService {
         &self,
         _: Request<CommitCandidateRequest>,
     ) -> Result<Response<CommitCandidateResponse>, Status> {
-        // The Swift converter does not expose learning yet; accept and ignore.
+        // The Swift converter learns automatically during requestCandidates; accept and ignore.
         Ok(Response::new(CommitCandidateResponse {}))
+    }
+
+    async fn reset_learning(
+        &self,
+        _: Request<ResetLearningRequest>,
+    ) -> Result<Response<ResetLearningResponse>, Status> {
+        reset_learning();
+        Ok(Response::new(ResetLearningResponse {}))
     }
 }
 

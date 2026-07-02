@@ -73,6 +73,9 @@ message CommitCandidateRequest {
 
 message CommitCandidateResponse {}
 
+message ResetLearningRequest {}
+message ResetLearningResponse {}
+
 
 // Service definition for text editing operations.
 service AzookeyService {
@@ -84,4 +87,5 @@ service AzookeyService {
   rpc SetContext (SetContextRequest) returns (SetContextResponse);
   rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse);
   rpc CommitCandidate (CommitCandidateRequest) returns (CommitCandidateResponse);
+  rpc ResetLearning (ResetLearningRequest) returns (ResetLearningResponse);
 }
