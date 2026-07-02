@@ -12,6 +12,7 @@ pub enum UserAction {
     Escape,
     Unknown,
     Navigation(Navigation),
+    ShiftedNavigation(Navigation),
     Function(Function),
     Number(i8),
     ToggleInputMode,
@@ -44,9 +45,17 @@ impl TryFrom<usize> for UserAction {
             0x20 => UserAction::Space,     // VK_SPACE
             0x1B => UserAction::Escape,    // VK_ESCAPE
 
-            0x25 => UserAction::Navigation(Navigation::Left), // VK_LEFT
+            0x25 => if VK_SHIFT.is_pressed() {
+                UserAction::ShiftedNavigation(Navigation::Left)
+            } else {
+                UserAction::Navigation(Navigation::Left)
+            }, // VK_LEFT
             0x26 => UserAction::Navigation(Navigation::Up),   // VK_UP
-            0x27 => UserAction::Navigation(Navigation::Right), // VK_RIGHT
+            0x27 => if VK_SHIFT.is_pressed() {
+                UserAction::ShiftedNavigation(Navigation::Right)
+            } else {
+                UserAction::Navigation(Navigation::Right)
+            }, // VK_RIGHT
             0x28 => UserAction::Navigation(Navigation::Down), // VK_DOWN
 
             0x30..=0x39 | 0x60..=0x69 if !VK_SHIFT.is_pressed() => {
@@ -71,7 +80,9 @@ impl TryFrom<usize> for UserAction {
             0x78 => UserAction::Function(Function::Nine), // VK_F9
             0x79 => UserAction::Function(Function::Ten), // VK_F10
 
-            0xF3 | 0xF4 => UserAction::ToggleInputMode, // Zenkaku/Hankaku
+            0x15 => UserAction::ToggleInputMode,         // VK_KANA (Hiragana/Katakana)
+            0x19 => UserAction::ToggleInputMode,         // VK_KANJI (Hankaku/Zenkaku toggle on JIS keyboard)
+            0xF3 | 0xF4 => UserAction::ToggleInputMode, // VK_DBE_SBCSCHAR/VK_DBE_DBCSCHAR
 
             _ => {
                 let key_state = {

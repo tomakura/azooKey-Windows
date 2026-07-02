@@ -26,8 +26,10 @@ pub fn get_candidate_window_position(
         )
     };
 
-    let mut monitor_info = MONITORINFO::default();
-    monitor_info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    let mut monitor_info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
 
     unsafe {
         let _ = GetMonitorInfoW(monitor, &mut monitor_info);

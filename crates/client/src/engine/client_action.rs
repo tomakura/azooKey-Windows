@@ -4,6 +4,7 @@ use super::input_mode::InputMode;
 pub enum ClientAction {
     StartComposition,
     EndComposition,
+    CommitCandidate,
 
     AppendText(String),
     RemoveText,
@@ -12,6 +13,7 @@ pub enum ClientAction {
     SetTextWithType(SetTextType),
 
     MoveCursor(i32),
+    ResizeConversion(i32),
     SetSelection(SetSelectionType),
 
     SetIMEMode(InputMode),

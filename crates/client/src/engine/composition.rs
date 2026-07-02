@@ -50,6 +50,96 @@ pub struct Composition {
     pub tip_composition: Option<ITfComposition>,
 }
 
+fn normalize_kana_input(text: &str, symbol_input_style: &str) -> String {
+    match symbol_input_style {
+        "raw" => text.to_string(),
+        _ => to_fullwidth(text, false),
+    }
+}
+
+fn normalize_keyboard_layout_input(text: &str, keyboard_layout: &str) -> String {
+    match keyboard_layout {
+        "dvorak_qwerty" => text.chars().map(dvorak_to_qwerty).collect(),
+        "colemak_qwerty" => text.chars().map(colemak_to_qwerty).collect(),
+        _ => text.to_string(),
+    }
+}
+
+fn colemak_to_qwerty(ch: char) -> char {
+    let lower = ch.to_ascii_lowercase();
+    let mapped = match lower {
+        'f' => 'e',
+        'p' => 'r',
+        'g' => 't',
+        'j' => 'y',
+        'l' => 'u',
+        'u' => 'i',
+        'y' => 'o',
+        ';' => 'p',
+        'r' => 's',
+        's' => 'd',
+        't' => 'f',
+        'd' => 'g',
+        'n' => 'j',
+        'e' => 'k',
+        'i' => 'l',
+        'o' => ';',
+        'k' => 'n',
+        _ => ch,
+    };
+    if ch.is_ascii_uppercase() {
+        mapped.to_ascii_uppercase()
+    } else {
+        mapped
+    }
+}
+
+fn dvorak_to_qwerty(ch: char) -> char {
+    let lower = ch.to_ascii_lowercase();
+    let mapped = match lower {
+        '\'' => 'q',
+        ',' => 'w',
+        '.' => 'e',
+        'p' => 'r',
+        'y' => 't',
+        'f' => 'y',
+        'g' => 'u',
+        'c' => 'i',
+        'r' => 'o',
+        'l' => 'p',
+        '/' => '[',
+        '=' => ']',
+        'a' => 'a',
+        'o' => 's',
+        'e' => 'd',
+        'u' => 'f',
+        'i' => 'g',
+        'd' => 'h',
+        'h' => 'j',
+        't' => 'k',
+        'n' => 'l',
+        's' => ';',
+        '-' => '\'',
+        ';' => 'z',
+        'q' => 'x',
+        'j' => 'c',
+        'k' => 'v',
+        'x' => 'b',
+        'b' => 'n',
+        'm' => 'm',
+        'w' => ',',
+        'v' => '.',
+        'z' => '/',
+        _ => ch,
+    };
+
+    if ch.is_ascii_uppercase() {
+        mapped.to_ascii_uppercase()
+    } else {
+        mapped
+    }
+}
+
 impl ITfCompositionSink_Impl for TextServiceFactory_Impl {
     #[macros::anyhow]
     fn OnCompositionTerminated(
@@ -92,6 +182,9 @@ impl TextServiceFactory {
         };
 
         let action = UserAction::try_from(wparam.0)?;
+        let candidate_number_selection = shared::AppConfig::read()
+            .conversion
+            .candidate_number_selection;
 
         let (transition, actions) = match composition.state {
             CompositionState::None => match action {
@@ -141,11 +234,17 @@ impl TextServiceFactory {
                 }
                 UserAction::Enter => {
                     if composition.suffix.is_empty() {
-                        (CompositionState::None, vec![ClientAction::EndComposition])
+                        (
+                            CompositionState::None,
+                            vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
+                        )
                     } else {
                         (
                             CompositionState::Composing,
-                            vec![ClientAction::ShrinkText("".to_string())],
+                            vec![
+                                ClientAction::CommitCandidate,
+                                ClientAction::ShrinkText("".to_string()),
+                            ],
                         )
                     }
                 }
@@ -154,13 +253,9 @@ impl TextServiceFactory {
                     vec![ClientAction::RemoveText, ClientAction::EndComposition],
                 ),
                 UserAction::Navigation(direction) => match direction {
-                    Navigation::Right => (
-                        CompositionState::Composing,
-                        vec![ClientAction::MoveCursor(1)],
-                    ),
-                    Navigation::Left => (
-                        CompositionState::Composing,
-                        vec![ClientAction::MoveCursor(-1)],
+                    Navigation::Right | Navigation::Left => (
+                        CompositionState::None,
+                        vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
                     ),
                     Navigation::Up => (
                         CompositionState::Previewing,
@@ -170,6 +265,17 @@ impl TextServiceFactory {
                         CompositionState::Previewing,
                         vec![ClientAction::SetSelection(SetSelectionType::Down)],
                     ),
+                },
+                UserAction::ShiftedNavigation(direction) => match direction {
+                    Navigation::Right => (
+                        CompositionState::Previewing,
+                        vec![ClientAction::ResizeConversion(1)],
+                    ),
+                    Navigation::Left => (
+                        CompositionState::Previewing,
+                        vec![ClientAction::ResizeConversion(-1)],
+                    ),
+                    _ => return Ok(None),
                 },
                 UserAction::ToggleInputMode => (
                     CompositionState::None,
@@ -211,11 +317,23 @@ impl TextServiceFactory {
             CompositionState::Previewing => match action {
                 UserAction::Input(char) => (
                     CompositionState::Composing,
-                    vec![ClientAction::ShrinkText(char.to_string())],
+                    vec![
+                        ClientAction::CommitCandidate,
+                        ClientAction::ShrinkText(char.to_string()),
+                    ],
+                ),
+                UserAction::Number(number) if candidate_number_selection => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetSelection(SetSelectionType::Number(
+                        candidate_number_to_index(number),
+                    ))],
                 ),
                 UserAction::Number(number) => (
                     CompositionState::Composing,
-                    vec![ClientAction::ShrinkText(number.to_string())],
+                    vec![
+                        ClientAction::CommitCandidate,
+                        ClientAction::ShrinkText(number.to_string()),
+                    ],
                 ),
                 UserAction::Backspace => {
                     if composition.preview.chars().count() == 1 {
@@ -229,11 +347,17 @@ impl TextServiceFactory {
                 }
                 UserAction::Enter => {
                     if composition.suffix.is_empty() {
-                        (CompositionState::None, vec![ClientAction::EndComposition])
+                        (
+                            CompositionState::None,
+                            vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
+                        )
                     } else {
                         (
                             CompositionState::Composing,
-                            vec![ClientAction::ShrinkText("".to_string())],
+                            vec![
+                                ClientAction::CommitCandidate,
+                                ClientAction::ShrinkText("".to_string()),
+                            ],
                         )
                     }
                 }
@@ -242,13 +366,9 @@ impl TextServiceFactory {
                     vec![ClientAction::RemoveText, ClientAction::EndComposition],
                 ),
                 UserAction::Navigation(direction) => match direction {
-                    Navigation::Right => (
-                        CompositionState::Composing,
-                        vec![ClientAction::MoveCursor(1)],
-                    ),
-                    Navigation::Left => (
-                        CompositionState::Composing,
-                        vec![ClientAction::MoveCursor(-1)],
+                    Navigation::Right | Navigation::Left => (
+                        CompositionState::None,
+                        vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
                     ),
                     Navigation::Up => (
                         CompositionState::Previewing,
@@ -258,6 +378,17 @@ impl TextServiceFactory {
                         CompositionState::Previewing,
                         vec![ClientAction::SetSelection(SetSelectionType::Down)],
                     ),
+                },
+                UserAction::ShiftedNavigation(direction) => match direction {
+                    Navigation::Right => (
+                        CompositionState::Previewing,
+                        vec![ClientAction::ResizeConversion(1)],
+                    ),
+                    Navigation::Left => (
+                        CompositionState::Previewing,
+                        vec![ClientAction::ResizeConversion(-1)],
+                    ),
+                    _ => return Ok(None),
                 },
                 UserAction::ToggleInputMode => (
                     CompositionState::None,
@@ -339,9 +470,12 @@ impl TextServiceFactory {
         let mut suffix = composition.suffix.clone();
         let mut raw_input = composition.raw_input.clone();
         let mut raw_hiragana = composition.raw_hiragana.clone();
-        let mut corresponding_count = composition.corresponding_count.clone();
+        let mut corresponding_count = composition.corresponding_count;
         let mut candidates = composition.candidates.clone();
         let mut selection_index = composition.selection_index;
+        let app_config = shared::AppConfig::read();
+        let symbol_input_style = app_config.conversion.symbol_input_style;
+        let keyboard_layout = app_config.conversion.keyboard_layout;
         let mut ipc_service = IMEState::get()?
             .ipc_service
             .clone()
@@ -357,6 +491,15 @@ impl TextServiceFactory {
                     self.update_pos()?;
                     ipc_service.show_window()?;
                 }
+                ClientAction::CommitCandidate => {
+                    let reading = raw_hiragana
+                        .chars()
+                        .take(corresponding_count.max(0) as usize)
+                        .collect::<String>();
+                    if !reading.is_empty() && !preview.is_empty() {
+                        ipc_service.commit_candidate(reading, preview.clone())?;
+                    }
+                }
                 ClientAction::EndComposition => {
                     self.end_composition()?;
                     selection_index = 0;
@@ -366,14 +509,15 @@ impl TextServiceFactory {
                     raw_input.clear();
                     raw_hiragana.clear();
                     ipc_service.hide_window()?;
-                    ipc_service.set_candidates(vec![])?;
+                    ipc_service.set_candidates(&Candidates::default())?;
                     ipc_service.clear_text()?;
                 }
                 ClientAction::AppendText(text) => {
+                    let text = normalize_keyboard_layout_input(text, &keyboard_layout);
                     raw_input.push_str(&text);
 
                     let text = match mode {
-                        InputMode::Kana => to_fullwidth(text, false),
+                        InputMode::Kana => normalize_kana_input(&text, &symbol_input_style),
                         InputMode::Latin => text.to_string(),
                     };
 
@@ -389,8 +533,8 @@ impl TextServiceFactory {
                     raw_hiragana = hiragana.clone();
 
                     self.set_text(&text, &sub_text)?;
-                    ipc_service.set_candidates(candidates.texts.clone())?;
-                    ipc_service.set_selection(selection_index as i32)?;
+                    ipc_service.set_candidates(&candidates)?;
+                    ipc_service.set_selection(selection_index)?;
                 }
                 ClientAction::RemoveText => {
                     candidates = ipc_service.remove_text()?;
@@ -421,20 +565,57 @@ impl TextServiceFactory {
                     raw_hiragana = hiragana.clone();
 
                     self.set_text(&text, &sub_text)?;
-                    ipc_service.set_candidates(candidates.texts.clone())?;
-                    ipc_service.set_selection(selection_index as i32)?;
+                    ipc_service.set_candidates(&candidates)?;
+                    ipc_service.set_selection(selection_index)?;
                 }
                 ClientAction::MoveCursor(_offset) => {
                     // TODO: I'll use azookey-kkc's composingText
                     // self.set_cursor(offset)?;
+                }
+                ClientAction::ResizeConversion(offset) => {
+                    let texts = candidates.texts.clone();
+                    if texts.is_empty() {
+                        continue;
+                    }
+                    let current_cc = corresponding_count;
+                    let target_index = if *offset > 0 {
+                        candidates
+                            .corresponding_count
+                            .iter()
+                            .enumerate()
+                            .find(|(_, &cc)| cc > current_cc)
+                            .map(|(i, _)| i as i32)
+                    } else {
+                        candidates
+                            .corresponding_count
+                            .iter()
+                            .enumerate()
+                            .rfind(|(_, &cc)| cc < current_cc)
+                            .map(|(i, _)| i as i32)
+                    };
+                    if let Some(idx) = target_index {
+                        selection_index = idx;
+                        ipc_service.set_selection(selection_index)?;
+                        let text = texts[selection_index as usize].clone();
+                        let sub_text = candidates.sub_texts[selection_index as usize].clone();
+                        let hiragana = candidates.hiragana.clone();
+                        corresponding_count =
+                            candidates.corresponding_count[selection_index as usize];
+                        preview = text.clone();
+                        suffix = sub_text.clone();
+                        raw_hiragana = hiragana.clone();
+                        self.set_text(&text, &sub_text)?;
+                    }
                 }
                 ClientAction::SetIMEMode(mode) => {
                     self.start_composition()?;
                     self.update_pos()?;
                     self.end_composition()?;
 
-                    let mut ime_state = IMEState::get()?;
-                    ime_state.input_mode = mode.clone();
+                    {
+                        let mut ime_state = IMEState::get()?;
+                        ime_state.input_mode = mode.clone();
+                    } // release IME_STATE mutex before update_lang_bar() calls GetIcon()
 
                     // update the language bar
                     self.update_lang_bar()?;
@@ -458,20 +639,25 @@ impl TextServiceFactory {
                     let candidates = {
                         let text_service = self.borrow()?;
                         let composition = text_service.borrow_composition()?.clone();
-                        let candidates = composition.candidates.clone();
-                        candidates
+                        composition.candidates.clone()
                     };
 
                     let texts = candidates.texts.clone();
                     let sub_texts = candidates.sub_texts.clone();
 
+                    if texts.is_empty() {
+                        continue;
+                    }
+
                     selection_index = match selection {
                         SetSelectionType::Up => max(0, selection_index - 1),
                         SetSelectionType::Down => min(texts.len() as i32 - 1, selection_index + 1),
-                        SetSelectionType::Number(number) => *number,
+                        SetSelectionType::Number(number) => {
+                            min(max(0, *number), texts.len() as i32 - 1)
+                        }
                     };
 
-                    ipc_service.set_selection(selection_index as i32)?;
+                    ipc_service.set_selection(selection_index)?;
                     let text = texts[selection_index as usize].clone();
                     let sub_text = sub_texts[selection_index as usize].clone();
                     let hiragana = candidates.hiragana.clone();
@@ -485,15 +671,16 @@ impl TextServiceFactory {
                 }
                 ClientAction::ShrinkText(text) => {
                     // shrink text
+                    let text = normalize_keyboard_layout_input(text, &keyboard_layout);
                     raw_input.push_str(&text);
                     raw_input = raw_input
                         .chars()
                         .skip(corresponding_count as usize)
                         .collect();
 
-                    ipc_service.shrink_text(corresponding_count.clone())?;
+                    ipc_service.shrink_text(corresponding_count)?;
                     let text = match mode {
-                        InputMode::Kana => to_fullwidth(text, false),
+                        InputMode::Kana => normalize_kana_input(&text, &symbol_input_style),
                         InputMode::Latin => text.to_string(),
                     };
                     candidates = ipc_service.append_text(text)?;
@@ -509,8 +696,8 @@ impl TextServiceFactory {
                     suffix = sub_text.clone();
                     raw_hiragana = hiragana.clone();
 
-                    ipc_service.set_candidates(candidates.texts.clone())?;
-                    ipc_service.set_selection(selection_index as i32)?;
+                    ipc_service.set_candidates(&candidates)?;
+                    ipc_service.set_selection(selection_index)?;
                     self.update_pos()?;
 
                     transition = CompositionState::Composing;
@@ -542,5 +729,60 @@ impl TextServiceFactory {
         composition.corresponding_count = corresponding_count;
 
         Ok(())
+    }
+}
+
+fn candidate_number_to_index(number: i8) -> i32 {
+    match number {
+        0 => 9,
+        1..=9 => number as i32 - 1,
+        _ => 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{candidate_number_to_index, normalize_kana_input, normalize_keyboard_layout_input};
+
+    #[test]
+    fn maps_number_keys_to_candidate_indexes() {
+        assert_eq!(candidate_number_to_index(1), 0);
+        assert_eq!(candidate_number_to_index(9), 8);
+        assert_eq!(candidate_number_to_index(0), 9);
+    }
+
+    #[test]
+    fn normalizes_kana_symbols_from_config() {
+        assert_eq!(normalize_kana_input(",", "japanese"), "、");
+        assert_eq!(normalize_kana_input(".", "japanese"), "。");
+        assert_eq!(normalize_kana_input(",", "raw"), ",");
+    }
+
+    #[test]
+    fn maps_dvorak_output_to_qwerty_input() {
+        assert_eq!(
+            normalize_keyboard_layout_input("dhtns", "dvorak_qwerty"),
+            "hjkl;"
+        );
+        assert_eq!(
+            normalize_keyboard_layout_input("',.py", "dvorak_qwerty"),
+            "qwert"
+        );
+        assert_eq!(normalize_keyboard_layout_input("abc", "system"), "abc");
+    }
+
+    #[test]
+    fn maps_colemak_output_to_qwerty_input() {
+        // Colemak f→e, p→r, g→t, j→y, l→u, u→i
+        assert_eq!(
+            normalize_keyboard_layout_input("fpgjlu", "colemak_qwerty"),
+            "ertyui"
+        );
+        // Colemak n→j, e→k, i→l
+        assert_eq!(
+            normalize_keyboard_layout_input("nei", "colemak_qwerty"),
+            "jkl"
+        );
+        assert_eq!(normalize_keyboard_layout_input("abc", "colemak_qwerty"), "abc");
     }
 }

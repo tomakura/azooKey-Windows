@@ -128,16 +128,16 @@ where
         self
     }
 
-    /// Supply an arbitrary writer to which to write trace contents.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// # use tracing_chrome::ChromeLayerBuilder;
-    /// # use tracing_subscriber::prelude::*;
-    /// let (layer, guard) = ChromeLayerBuilder::new().writer(std::io::sink()).build();
-    /// # tracing_subscriber::registry().with(layer).init();
-    /// ```
+    // Supply an arbitrary writer to which to write trace contents.
+    //
+    // # Examples
+    //
+    // ```rust
+    // # use tracing_chrome::ChromeLayerBuilder;
+    // # use tracing_subscriber::prelude::*;
+    // let (layer, guard) = ChromeLayerBuilder::new().writer(std::io::sink()).build();
+    // # tracing_subscriber::registry().with(layer).init();
+    // ```
     // pub fn writer<W: Write + Send + 'static>(mut self, writer: W) -> Self {
     //     self.out_writer = Some();
     //     self
@@ -177,14 +177,12 @@ where
         let (sender, receiver) = std::sync::mpsc::channel();
 
         std::thread::spawn(move || {
-            while let Ok(_) = receiver.recv() {
+            if receiver.recv().is_ok() {
                 let writer = writer_rc.lock().unwrap();
                 let trace = ChromeTrace::new();
                 trace
                     .write_entries(&mut writer.try_clone().unwrap())
                     .unwrap();
-
-                break;
             }
         });
 
@@ -272,7 +270,7 @@ where
         self.trace.add_entry(entry);
 
         let mut writer = self.writer.lock().unwrap();
-        self.trace.write_entries(&mut *writer)?;
+        self.trace.write_entries(&mut writer)?;
 
         Ok(())
     }
@@ -319,7 +317,7 @@ where
         self.trace.add_entry(entry);
 
         let mut writer = self.writer.lock().unwrap();
-        self.trace.write_entries(&mut *writer)?;
+        self.trace.write_entries(&mut writer)?;
 
         Ok(())
     }
@@ -378,7 +376,7 @@ where
             let mut args = Object::new();
             attrs.record(&mut JsonVisitor { object: &mut args });
             if let Some(span) = ctx.span(id) {
-                let _result = span.extensions_mut().insert(ArgsWrapper {
+                span.extensions_mut().insert(ArgsWrapper {
                     args: Arc::new(args),
                 });
             }
@@ -404,6 +402,7 @@ impl<'a> Visit for JsonVisitor<'a> {
     }
 }
 
+#[allow(dead_code)]
 pub struct StringVisitor<'a> {
     string: &'a mut String,
 }

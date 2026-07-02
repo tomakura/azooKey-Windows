@@ -23,7 +23,7 @@ pub fn create_candidate_window(event_loop: &EventLoop<UserEvent>) -> Result<Wind
         .with_visible(false)
         .with_undecorated_shadow(false)
         .with_transparent(true)
-        .build(&event_loop)
+        .build(event_loop)
         .context("Failed to create window")?;
 
     let hwnd = window.hwnd() as *mut std::ffi::c_void;
@@ -42,11 +42,36 @@ pub fn create_candidate_window(event_loop: &EventLoop<UserEvent>) -> Result<Wind
     Ok(window)
 }
 
-pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
-    let webview_builder = WebViewBuilder::new()
-    .with_transparent(true)
-    .with_html(
-        r##"
+fn build_candidate_html() -> String {
+    let config = shared::AppConfig::read();
+    let appearance = &config.appearance;
+
+    let theme_style = if appearance.custom_css_enabled {
+        format!("<style>{}</style>", appearance.custom_css)
+    } else {
+        let is_custom = appearance.background_color != "#FFFFFF"
+            || appearance.accent_color != "#2CB5FF"
+            || appearance.text_color != "#000000";
+        if is_custom {
+            let bg = &appearance.background_color;
+            let accent = &appearance.accent_color;
+            let fg = &appearance.text_color;
+            let sel_bg = format!("{accent}33");
+            format!(
+                "<style>:root{{--bg:{bg};--accent:{accent};--fg:{fg};--sel-bg:{sel_bg};}}\
+                 body{{color:var(--fg);}}\
+                 main{{background-color:var(--bg);border-color:color-mix(in srgb,var(--fg) 15%,transparent);}}\
+                 li[data-selected]{{background-color:var(--sel-bg);outline-color:var(--accent);}}</style>"
+            )
+        } else {
+            String::new()
+        }
+    };
+
+    [CANDIDATE_HTML_HEAD, theme_style.as_str(), CANDIDATE_HTML_TAIL].concat()
+}
+
+const CANDIDATE_HTML_HEAD: &str = r##"
         <html>
             <head>
                 <style>
@@ -77,7 +102,6 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                         scroll-snap-type: y proximity;
                         list-style-position: inside;
                         list-style-type: none;
-                        counter-reset: number 0;
                         user-select: none;
                         cursor: pointer;
 
@@ -95,11 +119,11 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                         font-size: 0.9rem;
                         display: flex;
                         align-items: center;
+                        gap: 0.5rem;
                         scroll-snap-align: start;
 
                         &::before {
-                            content: counter(number);
-                            counter-increment: number 1;
+                            content: attr(data-shortcut);
                             color: #636363;
                             font-weight: bold;
                             font-size: 0.75rem;
@@ -114,6 +138,21 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                             outline: 1px solid #2CB5FF;
                             outline-offset: -1px;
                         }
+                    }
+                    .candidate-text {
+                        flex: 1;
+                        min-width: 0;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: nowrap;
+                    }
+                    .candidate-subtext {
+                        color: #757575;
+                        font-size: 0.78rem;
+                        min-width: 0;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                        white-space: nowrap;
                     }
                     footer {
                         display: flex;
@@ -138,7 +177,7 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                         }
                         li {
                             color: #E0E0E0;
-                        
+
                             &::before {
                                 color: #BDBDBD;
                             }
@@ -148,12 +187,17 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                                 outline: 1px solid #5C6BC0;
                             }
                         }
-                            
+                        .candidate-subtext {
+                            color: #BDBDBD;
+                        }
+
                         footer {
                             border-top: 1px solid #424242;
                         }
                     }
-                </style>
+                </style>"##;
+
+const CANDIDATE_HTML_TAIL: &str = r##"
                 <script>
                     function updateCandidates(candidates) {
                         const candidateList = document.getElementById('candidate-list');
@@ -161,11 +205,23 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                         const existingItems = Array.from(candidateList.children);
 
                         candidates.forEach((candidate, index) => {
+                            const item = typeof candidate === 'string' ? { text: candidate, subtext: '' } : candidate;
+                            const shortcut = index < 9 ? String(index + 1) : (index === 9 ? '0' : '');
                             if (existingItems[index]) {
-                                existingItems[index].textContent = candidate;
+                                existingItems[index].dataset.shortcut = shortcut;
+                                existingItems[index].querySelector('.candidate-text').textContent = item.text;
+                                existingItems[index].querySelector('.candidate-subtext').textContent = item.subtext || '';
                             } else {
                                 const li = document.createElement('li');
-                                li.textContent = candidate;
+                                li.dataset.shortcut = shortcut;
+                                const text = document.createElement('span');
+                                text.className = 'candidate-text';
+                                text.textContent = item.text;
+                                const subtext = document.createElement('span');
+                                subtext.className = 'candidate-subtext';
+                                subtext.textContent = item.subtext || '';
+                                li.appendChild(text);
+                                li.appendChild(subtext);
                                 candidateList.appendChild(li);
                             }
                         });
@@ -177,29 +233,31 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
 
                     function updateSelection(index) {
                         const candidateList = document.getElementById('candidate-list');
+                        if (!candidateList.children.length || !candidateList.children[index]) {
+                            return;
+                        }
                         const selected = candidateList.querySelector('[data-selected]');
                         if (selected) {
                             selected.removeAttribute('data-selected');
                         }
-                        
+
                         candidateList.children[index].setAttribute('data-selected', '');
-                        
+
                         const itemHeight = candidateList.children[0].offsetHeight;
-                        const visibleItems = Math.floor(candidateList.clientHeight / itemHeight);
-                        
+
                         const groupSize = 5;
                         const groupIndex = Math.floor(index / groupSize);
                         const scrollToIndex = groupIndex * groupSize;
-                        
+
                         if (index === scrollToIndex || !isElementInView(candidateList.children[index], candidateList)) {
                             candidateList.children[scrollToIndex].scrollIntoView({ behavior: "instant", block: "start", inline: "start" });
                         }
                     }
-                    
+
                     function isElementInView(element, container) {
                         const containerRect = container.getBoundingClientRect();
                         const elementRect = element.getBoundingClientRect();
-                        
+
                         return (
                             elementRect.top >= containerRect.top &&
                             elementRect.bottom <= containerRect.bottom
@@ -208,48 +266,39 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
 
                     function adjustWindowSize() {
                         const candidateList = document.getElementById('candidate-list');
-                        
-                        // Clear any existing items
+
                         candidateList.innerHTML = '';
-                        
-                        // Add 5 test items to measure
+
                         for (let i = 0; i < 5; i++) {
                             const li = document.createElement('li');
                             li.textContent = `Item ${i+1}`;
                             candidateList.appendChild(li);
                         }
-                        
-                        // Calculate heights
+
                         const footer = document.querySelector('footer');
                         const main = document.querySelector('main');
                         const body = document.body;
-                        
-                        // Get the height of a single item
+
                         const itemHeight = candidateList.children[0].offsetHeight;
-                        
-                        // Calculate the height needed for exactly 5 items
                         const candidateListHeight = itemHeight * 5;
                         const footerHeight = footer.offsetHeight;
-                        const mainPadding = parseInt(window.getComputedStyle(main).paddingTop) + 
+                        const mainPadding = parseInt(window.getComputedStyle(main).paddingTop) +
                                            parseInt(window.getComputedStyle(main).paddingBottom);
-                        const bodyPadding = parseInt(window.getComputedStyle(body).paddingTop) + 
+                        const bodyPadding = parseInt(window.getComputedStyle(body).paddingTop) +
                                           parseInt(window.getComputedStyle(body).paddingBottom);
-                        
-                        // Calculate total window height needed
+
                         const totalHeight = candidateListHeight + footerHeight + mainPadding + bodyPadding;
-                        
-                        // Clear the test items
+
                         candidateList.innerHTML = '';
-                        
+
                         window.ipc.postMessage(JSON.stringify({
                             type: 'resize',
                             height: totalHeight
                         }));
                     }
 
-                    
                     window.addEventListener('DOMContentLoaded', () => {
-                        setTimeout(adjustWindowSize, 50); // Small delay to ensure rendering is complete
+                        setTimeout(adjustWindowSize, 50);
                     });
                 </script>
             </head>
@@ -264,8 +313,12 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                     </footer>
                 </main>
             </body>
-        </html>"##,
-    );
+        </html>"##;
 
+pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
+    let html = build_candidate_html();
+    let webview_builder = WebViewBuilder::new()
+        .with_transparent(true)
+        .with_html(html);
     Ok(webview_builder)
 }

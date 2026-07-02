@@ -1,6 +1,7 @@
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Bot, User, Cpu } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Bot, User, Cpu, FileCode2, Gauge, SquareTerminal, WandSparkles } from "lucide-react";
 import {
     Select,
     SelectContent,
@@ -49,7 +50,20 @@ export const Zenzai = () => {
     const [value, setValue] = useState({
         enable: false,
         profile: "",
+        personalization: false,
+        personalization_path: "",
         backend: "",
+        inference_limit: 1,
+        timeout_ms: 1500,
+        model_path: "",
+        command_path: "",
+        prediction: false,
+        prediction_token_limit: 32,
+    });
+    const [magicConversion, setMagicConversion] = useState({
+        enable: false,
+        command_path: "",
+        timeout_ms: 1500,
     });
 
     const [capability, setCapability] = useState({
@@ -66,7 +80,21 @@ export const Zenzai = () => {
                 setValue({
                     enable: zenzai.enable,
                     profile: zenzai.profile,
+                    personalization: zenzai.personalization ?? false,
+                    personalization_path: zenzai.personalization_path ?? "",
                     backend: zenzai.backend,
+                    inference_limit: zenzai.inference_limit ?? 1,
+                    timeout_ms: zenzai.timeout_ms ?? 1500,
+                    model_path: zenzai.model_path ?? "",
+                    command_path: zenzai.command_path ?? "",
+                    prediction: zenzai.prediction ?? false,
+                    prediction_token_limit: zenzai.prediction_token_limit ?? 32,
+                });
+                const magic = data.magic_conversion ?? {};
+                setMagicConversion({
+                    enable: magic.enable ?? false,
+                    command_path: magic.command_path ?? "",
+                    timeout_ms: magic.timeout_ms ?? 1500,
                 });
             })
             .catch(() => {
@@ -113,6 +141,25 @@ export const Zenzai = () => {
         });
     };
 
+    const handlePersonalizationChange = async () => {
+        const data = await updateConfig((data) => {
+            data.zenzai.personalization = !value.personalization;
+        });
+
+        if (data) {
+            setValue((prev) => ({ ...prev, personalization: data.zenzai.personalization }));
+        }
+    };
+
+    const handlePersonalizationPathChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const personalization_path = event.target.value;
+        setValue((prev) => ({ ...prev, personalization_path }));
+
+        updateConfig((data) => {
+            data.zenzai.personalization_path = personalization_path;
+        });
+    };
+
     const handleBackendChange = async (backend: string) => {
         const data = await updateConfig((data) => {
             data.zenzai.backend = backend;
@@ -121,10 +168,96 @@ export const Zenzai = () => {
         if (data) {
             setValue((prev) => ({ ...prev, backend }));
             toast("バックエンドが変更されました", {
-                description: "変更を適用するには、PCを再起動してください",
+                description: "変更を適用するには、IMEサーバーを再起動してください",
                 duration: 10000,
             });
         }
+    };
+
+    const handleModelPathChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const model_path = event.target.value;
+        setValue((prev) => ({ ...prev, model_path }));
+
+        updateConfig((data) => {
+            data.zenzai.model_path = model_path;
+        });
+    };
+
+    const handleCommandPathChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const command_path = event.target.value;
+        setValue((prev) => ({ ...prev, command_path }));
+
+        updateConfig((data) => {
+            data.zenzai.command_path = command_path;
+        });
+    };
+
+    const handleInferenceLimitChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const inference_limit = Math.max(1, Number(event.target.value) || 1);
+        setValue((prev) => ({ ...prev, inference_limit }));
+
+        updateConfig((data) => {
+            data.zenzai.inference_limit = inference_limit;
+        });
+    };
+
+    const handleTimeoutChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const timeout_ms = Math.max(100, Number(event.target.value) || 1500);
+        setValue((prev) => ({ ...prev, timeout_ms }));
+
+        updateConfig((data) => {
+            data.zenzai.timeout_ms = timeout_ms;
+        });
+    };
+
+    const handleZenzaiPredictionChange = async () => {
+        const data = await updateConfig((data) => {
+            data.zenzai.prediction = !value.prediction;
+        });
+
+        if (data) {
+            setValue((prev) => ({ ...prev, prediction: data.zenzai.prediction }));
+        }
+    };
+
+    const handlePredictionTokenLimitChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const prediction_token_limit = Math.max(4, Number(event.target.value) || 32);
+        setValue((prev) => ({ ...prev, prediction_token_limit }));
+
+        updateConfig((data) => {
+            data.zenzai.prediction_token_limit = prediction_token_limit;
+        });
+    };
+
+    const handleMagicConversionChange = async () => {
+        const data = await updateConfig((data) => {
+            data.magic_conversion = data.magic_conversion ?? {};
+            data.magic_conversion.enable = !magicConversion.enable;
+        });
+
+        if (data) {
+            setMagicConversion((prev) => ({ ...prev, enable: data.magic_conversion.enable }));
+        }
+    };
+
+    const handleMagicCommandPathChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const command_path = event.target.value;
+        setMagicConversion((prev) => ({ ...prev, command_path }));
+
+        updateConfig((data) => {
+            data.magic_conversion = data.magic_conversion ?? {};
+            data.magic_conversion.command_path = command_path;
+        });
+    };
+
+    const handleMagicTimeoutChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const timeout_ms = Math.max(100, Number(event.target.value) || 1500);
+        setMagicConversion((prev) => ({ ...prev, timeout_ms }));
+
+        updateConfig((data) => {
+            data.magic_conversion = data.magic_conversion ?? {};
+            data.magic_conversion.timeout_ms = timeout_ms;
+        });
     };
 
     return (
@@ -143,6 +276,18 @@ export const Zenzai = () => {
                     </div>
                     <Switch checked={value.enable} onCheckedChange={handleZenzaiChange} />
                 </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Bot />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            Zenzai予測
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            Zenzaiに読みから追加候補を生成させます
+                        </p>
+                    </div>
+                    <Switch checked={value.prediction} disabled={!value.enable} onCheckedChange={handleZenzaiPredictionChange} />
+                </div>
                 <div className="space-y-4 rounded-md border p-4">
                     <div className="flex items-center space-x-4 ">
                         <User />
@@ -156,6 +301,96 @@ export const Zenzai = () => {
                         </div>
                     </div>
                     <Textarea placeholder="例）山田太郎、数学科の学生。" value={value.profile} disabled={!value.enable} onChange={handleProfileChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <User />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            パーソナライズ
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            ローカルの文脈ファイルをZenzaiのプロンプトに追加します
+                        </p>
+                    </div>
+                    <Switch checked={value.personalization} disabled={!value.enable} onCheckedChange={handlePersonalizationChange} />
+                </div>
+                <div className="space-y-4 rounded-md border p-4">
+                    <div className="flex items-center space-x-4">
+                        <FileCode2 />
+                        <div className="flex-1 space-y-1">
+                            <p className="text-sm font-medium leading-none">
+                                パーソナライズファイル
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                最大4096文字を変換文脈として読み込みます
+                            </p>
+                        </div>
+                    </div>
+                    <Input placeholder="C:\\path\\to\\personalization.txt" value={value.personalization_path} disabled={!value.enable || !value.personalization} onChange={handlePersonalizationPathChange} />
+                </div>
+                <div className="space-y-4 rounded-md border p-4">
+                    <div className="flex items-center space-x-4">
+                        <FileCode2 />
+                        <div className="flex-1 space-y-1">
+                            <p className="text-sm font-medium leading-none">
+                                モデル
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                空欄の場合はIMEサーバーと同じフォルダーのzenz.ggufを使用します
+                            </p>
+                        </div>
+                    </div>
+                    <Input placeholder="C:\\path\\to\\zenz.gguf" value={value.model_path} disabled={!value.enable} onChange={handleModelPathChange} />
+                </div>
+                <div className="space-y-4 rounded-md border p-4">
+                    <div className="flex items-center space-x-4">
+                        <SquareTerminal />
+                        <div className="flex-1 space-y-1">
+                            <p className="text-sm font-medium leading-none">
+                                llama.cpp CLI
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                空欄の場合は選択中のバックエンドからPATH経由でllama-cli.exeを使用します
+                            </p>
+                        </div>
+                    </div>
+                    <Input placeholder="C:\\path\\to\\llama-cli.exe" value={value.command_path} disabled={!value.enable} onChange={handleCommandPathChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Gauge />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            推論トークン数
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            候補番号を出力するための最大トークン数
+                        </p>
+                    </div>
+                    <Input className="w-24" type="number" min={1} max={8} value={value.inference_limit} disabled={!value.enable} onChange={handleInferenceLimitChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Gauge />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            タイムアウト
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            Zenzaiの応答を待つ最大時間
+                        </p>
+                    </div>
+                    <Input className="w-28" type="number" min={100} step={100} value={value.timeout_ms} disabled={!value.enable} onChange={handleTimeoutChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Gauge />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            Zenzai予測トークン数
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            追加候補を生成するための最大トークン数
+                        </p>
+                    </div>
+                    <Input className="w-24" type="number" min={4} max={128} value={value.prediction_token_limit} disabled={!value.enable || !value.prediction} onChange={handlePredictionTokenLimitChange} />
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <Cpu />
@@ -177,6 +412,47 @@ export const Zenzai = () => {
                             <ToolTipSelectItem name="Vulkan" value="vulkan" disabled={!capability.vulkan} tooltip="お使いのPCはVulkanに対応していません" />
                         </SelectContent>
                     </Select>
+                </div>
+            </section>
+            <section className="space-y-2">
+                <h1 className="text-sm font-bold text-foreground">いい感じ変換</h1>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <WandSparkles />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            いい感じ変換を有効化
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            読みと文脈を外部コマンドに渡し、返された各行を候補に追加します
+                        </p>
+                    </div>
+                    <Switch checked={magicConversion.enable} onCheckedChange={handleMagicConversionChange} />
+                </div>
+                <div className="space-y-4 rounded-md border p-4">
+                    <div className="flex items-center space-x-4">
+                        <SquareTerminal />
+                        <div className="flex-1 space-y-1">
+                            <p className="text-sm font-medium leading-none">
+                                変換コマンド
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                                --reading と --context を受け取り、候補を1行ずつ標準出力へ返す実行ファイル
+                            </p>
+                        </div>
+                    </div>
+                    <Input placeholder="C:\\path\\to\\magic-conversion.exe" value={magicConversion.command_path} disabled={!magicConversion.enable} onChange={handleMagicCommandPathChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Gauge />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            タイムアウト
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            いい感じ変換の応答を待つ最大時間
+                        </p>
+                    </div>
+                    <Input className="w-28" type="number" min={100} step={100} value={magicConversion.timeout_ms} disabled={!magicConversion.enable} onChange={handleMagicTimeoutChange} />
                 </div>
             </section>
         </div>

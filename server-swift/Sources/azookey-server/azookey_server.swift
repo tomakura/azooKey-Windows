@@ -2,41 +2,100 @@ import KanaKanjiConverterModule
 import Foundation
 import ffi
 
-@MainActor let converter = KanaKanjiConverter()
+@MainActor var converter: KanaKanjiConverter?
 @MainActor var composingText = ComposingText()
 
 @MainActor var execURL = URL(filePath: "")
 @MainActor var config: [String : Any] = [
     "enable": false,
     "profile": "",
+    "runtimeUseZenzai": true,
+    "inferenceLimit": 1,
 ]
 
-@MainActor func getOptions(context: String = "") -> ConvertRequestOptions {
-    return ConvertRequestOptions(
-        requireJapanesePrediction: true,
-        requireEnglishPrediction: false,
-        keyboardLanguage: .ja_JP,
-        learningType: .nothing,
-        dictionaryResourceURL: execURL.appendingPathComponent("Dictionary"),
-        memoryDirectoryURL: URL(filePath: "./test"),
-        sharedContainerURL: URL(filePath: "./test"),
-        textReplacer: .init {
-            return execURL.appendingPathComponent("EmojiDictionary").appendingPathComponent("emoji_all_E15.1.txt")
-        },
-        // zenzai
-        zenzaiMode: config["enable"] as! Bool ? .on(
-            weight: execURL.appendingPathComponent("zenz.gguf"),
-            inferenceLimit: 1,
-            requestRichCandidates: true,
-            personalizationMode: nil,
-            versionDependentMode: .v3(
-                .init(
-                    profile: config["profile"] as! String,
-                    leftSideContext: context
-                )
+@MainActor func ensureDirectory(_ url: URL) {
+    do {
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    } catch {
+        print("Failed to create directory \(url.path): \(error)")
+    }
+}
+
+@MainActor func appSupportURL() -> URL {
+    if let appDataPath = ProcessInfo.processInfo.environment["APPDATA"] {
+        return URL(filePath: appDataPath).appendingPathComponent("Azookey", isDirectory: true)
+    }
+    return execURL.appendingPathComponent("Azookey", isDirectory: true)
+}
+
+@MainActor func memoryDirectoryURL() -> URL {
+    let url = appSupportURL().appendingPathComponent("memory", isDirectory: true)
+    ensureDirectory(url)
+    return url
+}
+
+@MainActor func userDictionaryDirectoryURL() -> URL {
+    let url = appSupportURL().appendingPathComponent("user_dictionary", isDirectory: true)
+    ensureDirectory(url)
+    return url
+}
+
+@MainActor func emojiDictionaryURL() -> URL {
+    let directory = execURL.appendingPathComponent("EmojiDictionary", isDirectory: true)
+    for name in [
+        "emoji_all_E16.0.txt",
+        "emoji_all_E15.1.txt",
+        "emoji_all_E15.0.txt",
+        "emoji_all_E14.0.txt",
+        "emoji_all_E13.1.txt",
+    ] {
+        let candidate = directory.appendingPathComponent(name, isDirectory: false)
+        if FileManager.default.fileExists(atPath: candidate.path) {
+            return candidate
+        }
+    }
+    return directory.appendingPathComponent("emoji_all_E15.1.txt", isDirectory: false)
+}
+
+@MainActor func zenzaiMode(context: String) -> ConvertRequestOptions.ZenzaiMode {
+    guard (config["runtimeUseZenzai"] as? Bool) ?? true,
+          (config["enable"] as? Bool) ?? false else {
+        return .off
+    }
+
+    let profile = (config["profile"] as? String) ?? ""
+    return .on(
+        weight: execURL.appendingPathComponent("zenz.gguf", isDirectory: false),
+        inferenceLimit: (config["inferenceLimit"] as? Int) ?? 1,
+        requestRichCandidates: true,
+        personalizationMode: nil,
+        versionDependentMode: .v3(
+            .init(
+                profile: profile.isEmpty ? nil : profile,
+                leftSideContext: context.isEmpty ? nil : context,
+                enableAlignmentSeparator: true
             )
-        ) : .off,
+        )
+    )
+}
+
+@MainActor func getOptions(context: String = "") -> ConvertRequestOptions {
+    let emojiURL = emojiDictionaryURL()
+    return ConvertRequestOptions(
+        requireJapanesePrediction: .autoMix,
+        requireEnglishPrediction: .disabled,
+        keyboardLanguage: .ja_JP,
+        englishCandidateInRoman2KanaInput: false,
+        fullWidthRomanCandidate: true,
+        learningType: .nothing,
+        memoryDirectoryURL: memoryDirectoryURL(),
+        sharedContainerURL: userDictionaryDirectoryURL(),
+        textReplacer: .init(emojiDataProvider: { emojiURL }),
+        specialCandidateProviders: KanaKanjiConverter.defaultSpecialCandidateProviders,
+        zenzaiMode: zenzaiMode(context: context),
         preloadDictionary: true,
+        experimentalZenzaiPredictiveInput: false,
+        typoCorrectionMode: .automatic,
         metadata: .init(versionString: "Azookey for Windows")
     )
 }
@@ -56,20 +115,8 @@ struct SComposingText {
     var cursor: Int
 }
 
-func constructCandidateString(candidate: Candidate, hiragana: String) -> String {
-    var remainingHiragana = hiragana
-    var result = ""
-    
-    for data in candidate.data {
-        if remainingHiragana.count < data.ruby.count {
-            result += remainingHiragana
-            break
-        }
-        remainingHiragana.removeFirst(data.ruby.count)
-        result += data.word
-    }
-    
-    return result
+func constructCandidateString(candidate: Candidate, hiragana _: String) -> String {
+    return candidate.text
 }
 
 @_silgen_name("LoadConfig")
@@ -89,6 +136,10 @@ func constructCandidateString(candidate: Candidate, hiragana: String) -> String 
                 if let profileValue = zenzaiDict["profile"] as? String {
                     config["profile"] = profileValue
                 }
+
+                if let inferenceLimitValue = zenzaiDict["inference_limit"] as? Int {
+                    config["inferenceLimit"] = inferenceLimitValue
+                }
             }
         } catch {
             print("Failed to read settings: \(error)")
@@ -103,11 +154,19 @@ func constructCandidateString(candidate: Candidate, hiragana: String) -> String 
 ) {
     let path = String(cString: path)
     execURL = URL(filePath: path)
+    config["runtimeUseZenzai"] = use_zenzai
 
     load_config()
+    ensureDirectory(appSupportURL())
+
+    converter = KanaKanjiConverter(
+        dictionaryURL: execURL.appendingPathComponent("Dictionary", isDirectory: true),
+        preloadDictionary: true
+    )
+    converter?.setKeyboardLanguage(.ja_JP)
 
     composingText.insertAtCursorPosition("a", inputStyle: .roman2kana)
-    converter.requestCandidates(composingText, options: getOptions())
+    _ = converter?.requestCandidates(composingText, options: getOptions())
     composingText = ComposingText()
 }
 
@@ -149,6 +208,12 @@ func constructCandidateString(candidate: Candidate, hiragana: String) -> String 
 @_silgen_name("ClearText")
 @MainActor public func clear_text() {
     composingText = ComposingText()
+    converter?.stopComposition()
+}
+
+@_silgen_name("ResetLearning")
+@MainActor public func reset_learning() {
+    converter?.resetMemory()
 }
 
 func to_list_pointer(_ list: [FFICandidate]) -> UnsafeMutablePointer<UnsafeMutablePointer<FFICandidate>?> {
@@ -165,6 +230,10 @@ func to_list_pointer(_ list: [FFICandidate]) -> UnsafeMutablePointer<UnsafeMutab
     let hiragana = composingText.convertTarget
     let contextString = (config["context"] as? String) ?? ""
     let options = getOptions(context: contextString)
+    guard let converter else {
+        lengthPtr.pointee = 0
+        return to_list_pointer([])
+    }
     let converted = converter.requestCandidates(composingText, options: options)
     var result: [FFICandidate] = []
 
@@ -173,10 +242,10 @@ func to_list_pointer(_ list: [FFICandidate]) -> UnsafeMutablePointer<UnsafeMutab
 
         let text = strdup(constructCandidateString(candidate: candidate, hiragana: hiragana))
         let hiragana = strdup(hiragana)
-        let correspondingCount = candidate.correspondingCount
 
         var afterComposingText = composingText
-        afterComposingText.prefixComplete(correspondingCount: correspondingCount)
+        afterComposingText.prefixComplete(composingCount: candidate.composingCount)
+        let correspondingCount = composingText.convertTarget.count - afterComposingText.convertTarget.count
         let subtext = strdup(afterComposingText.convertTarget)
 
         result.append(FFICandidate(text: text, subtext: subtext, hiragana: hiragana, correspondingCount: Int32(correspondingCount)))        
@@ -192,7 +261,7 @@ func to_list_pointer(_ list: [FFICandidate]) -> UnsafeMutablePointer<UnsafeMutab
     offset: Int32
 ) -> UnsafeMutablePointer<CChar>  {
     var afterComposingText = composingText
-    afterComposingText.prefixComplete(correspondingCount: Int(offset))
+    afterComposingText.prefixComplete(composingCount: .surfaceCount(Int(offset)))
     composingText = afterComposingText
 
     return _strdup(composingText.convertTarget)!

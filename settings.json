@@ -3,6 +3,33 @@
     "zenzai": {
         "enable": false,
         "profile": "",
-        "backend": "cpu"
+        "personalization": false,
+        "personalization_path": "",
+        "backend": "cpu",
+        "inference_limit": 1,
+        "model_path": "",
+        "command_path": "",
+        "timeout_ms": 1500,
+        "prediction": false,
+        "prediction_token_limit": 32
+    },
+    "magic_conversion": {
+        "enable": false,
+        "command_path": "",
+        "timeout_ms": 1500
+    },
+    "learning": {
+        "enable": true
+    },
+    "conversion": {
+        "live_conversion": true,
+        "prediction": true,
+        "typo_correction": true,
+        "dynamic_candidates": true,
+        "input_style": "default",
+        "custom_input_table_path": "",
+        "candidate_number_selection": true,
+        "symbol_input_style": "japanese",
+        "keyboard_layout": "system"
     }
 }
