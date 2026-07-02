@@ -151,6 +151,65 @@ fn clear_learning_data(state: tauri::State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct LearningEntry {
+    reading: String,
+    text: String,
+    count: u32,
+}
+
+#[tauri::command]
+fn get_learning_data() -> Result<Vec<LearningEntry>, String> {
+    let path = learning_data_path()?;
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Ok(Vec::new());
+    };
+    let entries = content
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.splitn(3, '\t');
+            let reading = fields.next()?.trim();
+            let text = fields.next()?.trim();
+            let count = fields
+                .next()
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(1u32);
+            if reading.is_empty() || text.is_empty() {
+                return None;
+            }
+            Some(LearningEntry {
+                reading: reading.to_string(),
+                text: text.to_string(),
+                count,
+            })
+        })
+        .collect();
+    Ok(entries)
+}
+
+#[tauri::command]
+fn delete_learning_entry(
+    state: tauri::State<AppState>,
+    reading: String,
+    text: String,
+) -> Result<(), String> {
+    let path = learning_data_path()?;
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+    let new_content = content
+        .lines()
+        .filter(|line| {
+            let mut fields = line.splitn(3, '\t');
+            let r = fields.next().unwrap_or("").trim();
+            let t = fields.next().unwrap_or("").trim();
+            !(r == reading && t == text)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(path, new_content).map_err(|e| e.to_string())?;
+    notify_server_config_update(&state);
+    Ok(())
+}
+
 #[tauri::command]
 fn get_input_table() -> Result<String, String> {
     let path = input_table_path()?;
@@ -251,7 +310,9 @@ pub fn run() {
             clear_learning_data,
             get_input_table,
             update_input_table,
-            check_capability
+            check_capability,
+            get_learning_data,
+            delete_learning_entry
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

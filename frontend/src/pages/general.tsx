@@ -5,7 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { invoke } from "@tauri-apps/api/core";
 import { BrainCircuit, ExternalLink, Keyboard, Lightbulb, RefreshCcw, SpellCheck, Trash2, WandSparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 export const General = () => {
@@ -20,8 +20,11 @@ export const General = () => {
         candidate_number_selection: true,
         symbol_input_style: "japanese",
         keyboard_layout: "system",
+        max_candidates: 16,
     });
     const [inputTable, setInputTable] = useState("");
+    const [learningData, setLearningData] = useState<{ reading: string; text: string; count: number }[]>([]);
+    const maxCandidatesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
         invoke<any>("get_config")
@@ -37,6 +40,7 @@ export const General = () => {
                     candidate_number_selection: data.conversion?.candidate_number_selection ?? true,
                     symbol_input_style: data.conversion?.symbol_input_style ?? "japanese",
                     keyboard_layout: data.conversion?.keyboard_layout ?? "system",
+                    max_candidates: data.conversion?.max_candidates ?? 16,
                 });
             })
             .catch(() => {
@@ -45,6 +49,9 @@ export const General = () => {
         invoke<string>("get_input_table")
             .then(setInputTable)
             .catch(() => toast("入力テーブルの読み込みに失敗しました"));
+        invoke<{ reading: string; text: string; count: number }[]>("get_learning_data")
+            .then(setLearningData)
+            .catch(() => {});
     }, []);
 
     const updateConfig = async (updater: (config: any) => void) => {
@@ -157,10 +164,34 @@ export const General = () => {
         }
     };
 
+    const handleMaxCandidatesChange = (raw: string) => {
+        const n = parseInt(raw);
+        if (isNaN(n) || n < 1) return;
+        const clamped = Math.min(Math.max(n, 1), 100);
+        setValue((prev) => ({ ...prev, max_candidates: clamped }));
+        if (maxCandidatesTimer.current) clearTimeout(maxCandidatesTimer.current);
+        maxCandidatesTimer.current = setTimeout(async () => {
+            await updateConfig((data) => {
+                data.conversion = data.conversion ?? {};
+                data.conversion.max_candidates = clamped;
+            });
+        }, 400);
+    };
+
     const handleClearLearning = async () => {
         try {
             await invoke("clear_learning_data");
+            setLearningData([]);
             toast("学習データを削除しました");
+        } catch {
+            toast("学習データの削除に失敗しました");
+        }
+    };
+
+    const handleDeleteLearningEntry = async (reading: string, text: string) => {
+        try {
+            await invoke("delete_learning_entry", { reading, text });
+            setLearningData((prev) => prev.filter((e) => !(e.reading === reading && e.text === text)));
         } catch {
             toast("学習データの削除に失敗しました");
         }
@@ -339,8 +370,28 @@ export const General = () => {
                         <SelectContent>
                             <SelectItem value="system">システム配列</SelectItem>
                             <SelectItem value="dvorak_qwerty">Dvorak-QWERTY</SelectItem>
+                            <SelectItem value="colemak_qwerty">Colemak-QWERTY</SelectItem>
                         </SelectContent>
                     </Select>
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Keyboard />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            最大候補数
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            候補ウィンドウに表示する最大候補数を設定します
+                        </p>
+                    </div>
+                    <Input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={value.max_candidates}
+                        onChange={(e) => handleMaxCandidatesChange(e.target.value)}
+                        className="w-20 text-right"
+                    />
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <Trash2 />
@@ -357,6 +408,42 @@ export const General = () => {
                     </Button>
                 </div>
             </section>
+            {learningData.length > 0 && (
+                <section className="space-y-2">
+                    <h1 className="text-sm font-bold text-foreground">学習履歴</h1>
+                    <div className="rounded-md border overflow-hidden">
+                        <table className="w-full text-sm">
+                            <thead className="bg-muted">
+                                <tr>
+                                    <th className="text-left px-3 py-2 font-medium">読み</th>
+                                    <th className="text-left px-3 py-2 font-medium">変換</th>
+                                    <th className="text-right px-3 py-2 font-medium">回数</th>
+                                    <th className="w-10" />
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {learningData.map((entry, i) => (
+                                    <tr key={i} className="border-t">
+                                        <td className="px-3 py-2 text-muted-foreground">{entry.reading}</td>
+                                        <td className="px-3 py-2">{entry.text}</td>
+                                        <td className="px-3 py-2 text-right text-muted-foreground">{entry.count}</td>
+                                        <td className="px-2 py-1">
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => handleDeleteLearningEntry(entry.reading, entry.text)}
+                                                className="h-7 w-7 p-0"
+                                            >
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                            </Button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            )}
             <section className="space-y-2">
                 <h1 className="text-sm font-bold text-foreground">バージョンと更新プログラム</h1>
                 <div className="flex items-center space-x-4 rounded-md border p-4">

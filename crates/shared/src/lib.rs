@@ -115,6 +115,8 @@ pub struct ConversionConfig {
     pub symbol_input_style: String,
     #[serde(default = "default_keyboard_layout")]
     pub keyboard_layout: String,
+    #[serde(default = "default_max_candidates")]
+    pub max_candidates: usize,
 }
 
 impl Default for ConversionConfig {
@@ -129,6 +131,33 @@ impl Default for ConversionConfig {
             candidate_number_selection: default_enabled(),
             symbol_input_style: default_symbol_input_style(),
             keyboard_layout: default_keyboard_layout(),
+            max_candidates: default_max_candidates(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AppearanceConfig {
+    #[serde(default = "default_background_color")]
+    pub background_color: String,
+    #[serde(default = "default_accent_color")]
+    pub accent_color: String,
+    #[serde(default = "default_text_color")]
+    pub text_color: String,
+    #[serde(default)]
+    pub custom_css: String,
+    #[serde(default)]
+    pub custom_css_enabled: bool,
+}
+
+impl Default for AppearanceConfig {
+    fn default() -> Self {
+        AppearanceConfig {
+            background_color: default_background_color(),
+            accent_color: default_accent_color(),
+            text_color: default_text_color(),
+            custom_css: String::new(),
+            custom_css_enabled: false,
         }
     }
 }
@@ -145,6 +174,8 @@ pub struct AppConfig {
     pub learning: LearningConfig,
     #[serde(default)]
     pub conversion: ConversionConfig,
+    #[serde(default)]
+    pub appearance: AppearanceConfig,
 }
 
 impl Default for AppConfig {
@@ -155,6 +186,7 @@ impl Default for AppConfig {
             magic_conversion: MagicConversionConfig::default(),
             learning: LearningConfig::default(),
             conversion: ConversionConfig::default(),
+            appearance: AppearanceConfig::default(),
         }
     }
 }
@@ -168,7 +200,7 @@ fn default_zenzai_backend() -> String {
 }
 
 fn default_zenzai_inference_limit() -> usize {
-    1
+    2
 }
 
 fn default_zenzai_timeout_ms() -> u64 {
@@ -197,6 +229,22 @@ fn default_symbol_input_style() -> String {
 
 fn default_keyboard_layout() -> String {
     "system".to_string()
+}
+
+fn default_max_candidates() -> usize {
+    16
+}
+
+fn default_background_color() -> String {
+    "#FFFFFF".to_string()
+}
+
+fn default_accent_color() -> String {
+    "#2CB5FF".to_string()
+}
+
+fn default_text_color() -> String {
+    "#000000".to_string()
 }
 
 impl AppConfig {

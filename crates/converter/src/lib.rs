@@ -12,6 +12,7 @@ const MAX_DICTIONARY_CANDIDATES_PER_KEY: usize = 32;
 const MAX_RETURNED_CANDIDATES: usize = 16;
 const DEFAULT_ZENZAI_MODEL: &str = "zenz.gguf";
 const DEFAULT_ZENZAI_COMMAND: &str = "llama-cli.exe";
+pub const LLAMA_SERVER_PORT: u16 = 29847;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Candidate {
@@ -62,6 +63,7 @@ pub struct ConversionConfig {
     pub dynamic_candidates_enabled: bool,
     pub input_style: String,
     pub custom_input_table_path: Option<PathBuf>,
+    pub max_candidates: usize,
 }
 
 impl Default for ConversionConfig {
@@ -74,6 +76,7 @@ impl Default for ConversionConfig {
             dynamic_candidates_enabled: true,
             input_style: "default".to_string(),
             custom_input_table_path: None,
+            max_candidates: MAX_RETURNED_CANDIDATES,
         }
     }
 }
@@ -261,7 +264,6 @@ impl NativeConverter {
             &self.context,
             &self.hiragana,
         ));
-        candidates.extend(self.emoji_dictionary.lookup_best_prefixes(&self.hiragana));
         if self.conversion_config.learning_enabled {
             candidates.extend(self.learning.lookup_best_prefixes(&self.hiragana));
         }
@@ -276,16 +278,17 @@ impl NativeConverter {
                 candidates.extend(self.dictionary.lookup_typo_corrections(&self.hiragana));
             }
         }
+        candidates.extend(self.emoji_dictionary.lookup_best_prefixes(&self.hiragana));
         if self.conversion_config.prediction_enabled {
             candidates.extend(self.user_dictionary.lookup_predictions(&self.hiragana));
             if self.conversion_config.dynamic_candidates_enabled {
                 candidates.extend(DynamicDictionary::lookup_predictions(&self.hiragana));
             }
-            candidates.extend(self.emoji_dictionary.lookup_predictions(&self.hiragana));
             if self.conversion_config.learning_enabled {
                 candidates.extend(self.learning.lookup_predictions(&self.hiragana));
             }
             candidates.extend(self.dictionary.lookup_predictions(&self.hiragana));
+            candidates.extend(self.emoji_dictionary.lookup_predictions(&self.hiragana));
         }
         candidates.push(Candidate {
             text: self.hiragana.clone(),
@@ -293,12 +296,14 @@ impl NativeConverter {
             corresponding_count: self.hiragana.chars().count() as i32,
         });
         let candidates = dedupe_candidates(candidates);
-        self.zenzai.rerank(
+        let mut candidates = self.zenzai.rerank(
             &self.zenzai_config,
             &self.context,
             &self.hiragana,
             candidates,
-        )
+        );
+        candidates.truncate(self.conversion_config.max_candidates);
+        candidates
     }
 
     fn refresh_hiragana(&mut self) {
@@ -447,6 +452,8 @@ fn time_candidates(now: NaiveDateTime) -> Vec<String> {
     vec![
         format!("{:02}:{:02}", now.hour(), now.minute()),
         format!("{}時{}分", now.hour(), now.minute()),
+        format!("{:02}:{:02}:{:02}", now.hour(), now.minute(), now.second()),
+        format!("{}時{}分{}秒", now.hour(), now.minute(), now.second()),
     ]
 }
 
@@ -566,17 +573,11 @@ impl ZenzaiEngine {
             numbered
         );
 
-        let Some(output) = run_zenzai_command(config, prompt, config.inference_limit.max(1)) else {
+        let Some(output) = run_zenzai_command(config, prompt, config.inference_limit.max(2)) else {
             return candidates;
         };
 
-        let Some(index) = output
-            .chars()
-            .find(|ch| ch.is_ascii_digit())
-            .and_then(|ch| ch.to_digit(10))
-            .and_then(|value| value.checked_sub(1))
-            .map(|value| value as usize)
-        else {
+        let Some(index) = parse_candidate_index(&output) else {
             return candidates;
         };
 
@@ -633,22 +634,22 @@ fn personalization_text(config: &ZenzaiConfig) -> String {
 }
 
 fn run_zenzai_command(config: &ZenzaiConfig, prompt: String, limit: usize) -> Option<String> {
-    let mut child = Command::new(&config.command_path)
-        .arg("-m")
-        .arg(&config.model_path)
-        .arg("-n")
-        .arg(limit.to_string())
-        .arg("--temp")
-        .arg("0")
-        .arg("--no-display-prompt")
-        .arg("-p")
-        .arg(prompt)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
+    let url = format!("http://127.0.0.1:{}/completion", LLAMA_SERVER_PORT);
+    let body = serde_json::json!({
+        "prompt": prompt,
+        "n_predict": limit,
+        "temperature": 0,
+        "stream": false,
+    });
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_millis(config.timeout_ms))
+        .build();
+    let response = agent
+        .post(&url)
+        .send_json(body)
         .ok()?;
-
-    read_child_with_timeout(&mut child, config.timeout_ms)
+    let json: serde_json::Value = response.into_json().ok()?;
+    json.get("content")?.as_str().map(String::from)
 }
 
 fn read_child_with_timeout(child: &mut std::process::Child, timeout_ms: u64) -> Option<String> {
@@ -673,6 +674,15 @@ fn read_child_with_timeout(child: &mut std::process::Child, timeout_ms: u64) -> 
             Err(_) => return None,
         }
     }
+}
+
+fn parse_candidate_index(output: &str) -> Option<usize> {
+    let digits: String = output
+        .chars()
+        .skip_while(|ch| !ch.is_ascii_digit())
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect();
+    digits.parse::<usize>().ok()?.checked_sub(1)
 }
 
 fn promote_candidate(mut candidates: Vec<Candidate>, index: usize) -> Vec<Candidate> {

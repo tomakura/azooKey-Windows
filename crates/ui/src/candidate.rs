@@ -42,11 +42,36 @@ pub fn create_candidate_window(event_loop: &EventLoop<UserEvent>) -> Result<Wind
     Ok(window)
 }
 
-pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
-    let webview_builder = WebViewBuilder::new()
-    .with_transparent(true)
-    .with_html(
-        r##"
+fn build_candidate_html() -> String {
+    let config = shared::AppConfig::read();
+    let appearance = &config.appearance;
+
+    let theme_style = if appearance.custom_css_enabled {
+        format!("<style>{}</style>", appearance.custom_css)
+    } else {
+        let is_custom = appearance.background_color != "#FFFFFF"
+            || appearance.accent_color != "#2CB5FF"
+            || appearance.text_color != "#000000";
+        if is_custom {
+            let bg = &appearance.background_color;
+            let accent = &appearance.accent_color;
+            let fg = &appearance.text_color;
+            let sel_bg = format!("{accent}33");
+            format!(
+                "<style>:root{{--bg:{bg};--accent:{accent};--fg:{fg};--sel-bg:{sel_bg};}}\
+                 body{{color:var(--fg);}}\
+                 main{{background-color:var(--bg);border-color:color-mix(in srgb,var(--fg) 15%,transparent);}}\
+                 li[data-selected]{{background-color:var(--sel-bg);outline-color:var(--accent);}}</style>"
+            )
+        } else {
+            String::new()
+        }
+    };
+
+    [CANDIDATE_HTML_HEAD, theme_style.as_str(), CANDIDATE_HTML_TAIL].concat()
+}
+
+const CANDIDATE_HTML_HEAD: &str = r##"
         <html>
             <head>
                 <style>
@@ -152,7 +177,7 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                         }
                         li {
                             color: #E0E0E0;
-                        
+
                             &::before {
                                 color: #BDBDBD;
                             }
@@ -165,12 +190,14 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                         .candidate-subtext {
                             color: #BDBDBD;
                         }
-                            
+
                         footer {
                             border-top: 1px solid #424242;
                         }
                     }
-                </style>
+                </style>"##;
+
+const CANDIDATE_HTML_TAIL: &str = r##"
                 <script>
                     function updateCandidates(candidates) {
                         const candidateList = document.getElementById('candidate-list');
@@ -213,25 +240,24 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                         if (selected) {
                             selected.removeAttribute('data-selected');
                         }
-                        
+
                         candidateList.children[index].setAttribute('data-selected', '');
-                        
+
                         const itemHeight = candidateList.children[0].offsetHeight;
-                        const visibleItems = Math.floor(candidateList.clientHeight / itemHeight);
-                        
+
                         const groupSize = 5;
                         const groupIndex = Math.floor(index / groupSize);
                         const scrollToIndex = groupIndex * groupSize;
-                        
+
                         if (index === scrollToIndex || !isElementInView(candidateList.children[index], candidateList)) {
                             candidateList.children[scrollToIndex].scrollIntoView({ behavior: "instant", block: "start", inline: "start" });
                         }
                     }
-                    
+
                     function isElementInView(element, container) {
                         const containerRect = container.getBoundingClientRect();
                         const elementRect = element.getBoundingClientRect();
-                        
+
                         return (
                             elementRect.top >= containerRect.top &&
                             elementRect.bottom <= containerRect.bottom
@@ -240,48 +266,39 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
 
                     function adjustWindowSize() {
                         const candidateList = document.getElementById('candidate-list');
-                        
-                        // Clear any existing items
+
                         candidateList.innerHTML = '';
-                        
-                        // Add 5 test items to measure
+
                         for (let i = 0; i < 5; i++) {
                             const li = document.createElement('li');
                             li.textContent = `Item ${i+1}`;
                             candidateList.appendChild(li);
                         }
-                        
-                        // Calculate heights
+
                         const footer = document.querySelector('footer');
                         const main = document.querySelector('main');
                         const body = document.body;
-                        
-                        // Get the height of a single item
+
                         const itemHeight = candidateList.children[0].offsetHeight;
-                        
-                        // Calculate the height needed for exactly 5 items
                         const candidateListHeight = itemHeight * 5;
                         const footerHeight = footer.offsetHeight;
-                        const mainPadding = parseInt(window.getComputedStyle(main).paddingTop) + 
+                        const mainPadding = parseInt(window.getComputedStyle(main).paddingTop) +
                                            parseInt(window.getComputedStyle(main).paddingBottom);
-                        const bodyPadding = parseInt(window.getComputedStyle(body).paddingTop) + 
+                        const bodyPadding = parseInt(window.getComputedStyle(body).paddingTop) +
                                           parseInt(window.getComputedStyle(body).paddingBottom);
-                        
-                        // Calculate total window height needed
+
                         const totalHeight = candidateListHeight + footerHeight + mainPadding + bodyPadding;
-                        
-                        // Clear the test items
+
                         candidateList.innerHTML = '';
-                        
+
                         window.ipc.postMessage(JSON.stringify({
                             type: 'resize',
                             height: totalHeight
                         }));
                     }
 
-                    
                     window.addEventListener('DOMContentLoaded', () => {
-                        setTimeout(adjustWindowSize, 50); // Small delay to ensure rendering is complete
+                        setTimeout(adjustWindowSize, 50);
                     });
                 </script>
             </head>
@@ -296,8 +313,12 @@ pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
                     </footer>
                 </main>
             </body>
-        </html>"##,
-    );
+        </html>"##;
 
+pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
+    let html = build_candidate_html();
+    let webview_builder = WebViewBuilder::new()
+        .with_transparent(true)
+        .with_html(html);
     Ok(webview_builder)
 }

@@ -58,11 +58,40 @@ fn normalize_kana_input(text: &str, symbol_input_style: &str) -> String {
 }
 
 fn normalize_keyboard_layout_input(text: &str, keyboard_layout: &str) -> String {
-    if keyboard_layout != "dvorak_qwerty" {
-        return text.to_string();
+    match keyboard_layout {
+        "dvorak_qwerty" => text.chars().map(dvorak_to_qwerty).collect(),
+        "colemak_qwerty" => text.chars().map(colemak_to_qwerty).collect(),
+        _ => text.to_string(),
     }
+}
 
-    text.chars().map(dvorak_to_qwerty).collect()
+fn colemak_to_qwerty(ch: char) -> char {
+    let lower = ch.to_ascii_lowercase();
+    let mapped = match lower {
+        'f' => 'e',
+        'p' => 'r',
+        'g' => 't',
+        'j' => 'y',
+        'l' => 'u',
+        'u' => 'i',
+        'y' => 'o',
+        ';' => 'p',
+        'r' => 's',
+        's' => 'd',
+        't' => 'f',
+        'd' => 'g',
+        'n' => 'j',
+        'e' => 'k',
+        'i' => 'l',
+        'o' => ';',
+        'k' => 'n',
+        _ => ch,
+    };
+    if ch.is_ascii_uppercase() {
+        mapped.to_ascii_uppercase()
+    } else {
+        mapped
+    }
 }
 
 fn dvorak_to_qwerty(ch: char) -> char {
@@ -224,13 +253,9 @@ impl TextServiceFactory {
                     vec![ClientAction::RemoveText, ClientAction::EndComposition],
                 ),
                 UserAction::Navigation(direction) => match direction {
-                    Navigation::Right => (
-                        CompositionState::Composing,
-                        vec![ClientAction::MoveCursor(1)],
-                    ),
-                    Navigation::Left => (
-                        CompositionState::Composing,
-                        vec![ClientAction::MoveCursor(-1)],
+                    Navigation::Right | Navigation::Left => (
+                        CompositionState::None,
+                        vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
                     ),
                     Navigation::Up => (
                         CompositionState::Previewing,
@@ -240,6 +265,17 @@ impl TextServiceFactory {
                         CompositionState::Previewing,
                         vec![ClientAction::SetSelection(SetSelectionType::Down)],
                     ),
+                },
+                UserAction::ShiftedNavigation(direction) => match direction {
+                    Navigation::Right => (
+                        CompositionState::Previewing,
+                        vec![ClientAction::ResizeConversion(1)],
+                    ),
+                    Navigation::Left => (
+                        CompositionState::Previewing,
+                        vec![ClientAction::ResizeConversion(-1)],
+                    ),
+                    _ => return Ok(None),
                 },
                 UserAction::ToggleInputMode => (
                     CompositionState::None,
@@ -330,13 +366,9 @@ impl TextServiceFactory {
                     vec![ClientAction::RemoveText, ClientAction::EndComposition],
                 ),
                 UserAction::Navigation(direction) => match direction {
-                    Navigation::Right => (
-                        CompositionState::Composing,
-                        vec![ClientAction::MoveCursor(1)],
-                    ),
-                    Navigation::Left => (
-                        CompositionState::Composing,
-                        vec![ClientAction::MoveCursor(-1)],
+                    Navigation::Right | Navigation::Left => (
+                        CompositionState::None,
+                        vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
                     ),
                     Navigation::Up => (
                         CompositionState::Previewing,
@@ -346,6 +378,17 @@ impl TextServiceFactory {
                         CompositionState::Previewing,
                         vec![ClientAction::SetSelection(SetSelectionType::Down)],
                     ),
+                },
+                UserAction::ShiftedNavigation(direction) => match direction {
+                    Navigation::Right => (
+                        CompositionState::Previewing,
+                        vec![ClientAction::ResizeConversion(1)],
+                    ),
+                    Navigation::Left => (
+                        CompositionState::Previewing,
+                        vec![ClientAction::ResizeConversion(-1)],
+                    ),
+                    _ => return Ok(None),
                 },
                 UserAction::ToggleInputMode => (
                     CompositionState::None,
@@ -529,13 +572,50 @@ impl TextServiceFactory {
                     // TODO: I'll use azookey-kkc's composingText
                     // self.set_cursor(offset)?;
                 }
+                ClientAction::ResizeConversion(offset) => {
+                    let texts = candidates.texts.clone();
+                    if texts.is_empty() {
+                        continue;
+                    }
+                    let current_cc = corresponding_count;
+                    let target_index = if *offset > 0 {
+                        candidates
+                            .corresponding_count
+                            .iter()
+                            .enumerate()
+                            .find(|(_, &cc)| cc > current_cc)
+                            .map(|(i, _)| i as i32)
+                    } else {
+                        candidates
+                            .corresponding_count
+                            .iter()
+                            .enumerate()
+                            .rfind(|(_, &cc)| cc < current_cc)
+                            .map(|(i, _)| i as i32)
+                    };
+                    if let Some(idx) = target_index {
+                        selection_index = idx;
+                        ipc_service.set_selection(selection_index)?;
+                        let text = texts[selection_index as usize].clone();
+                        let sub_text = candidates.sub_texts[selection_index as usize].clone();
+                        let hiragana = candidates.hiragana.clone();
+                        corresponding_count =
+                            candidates.corresponding_count[selection_index as usize];
+                        preview = text.clone();
+                        suffix = sub_text.clone();
+                        raw_hiragana = hiragana.clone();
+                        self.set_text(&text, &sub_text)?;
+                    }
+                }
                 ClientAction::SetIMEMode(mode) => {
                     self.start_composition()?;
                     self.update_pos()?;
                     self.end_composition()?;
 
-                    let mut ime_state = IMEState::get()?;
-                    ime_state.input_mode = mode.clone();
+                    {
+                        let mut ime_state = IMEState::get()?;
+                        ime_state.input_mode = mode.clone();
+                    } // release IME_STATE mutex before update_lang_bar() calls GetIcon()
 
                     // update the language bar
                     self.update_lang_bar()?;
@@ -564,6 +644,10 @@ impl TextServiceFactory {
 
                     let texts = candidates.texts.clone();
                     let sub_texts = candidates.sub_texts.clone();
+
+                    if texts.is_empty() {
+                        continue;
+                    }
 
                     selection_index = match selection {
                         SetSelectionType::Up => max(0, selection_index - 1),
@@ -685,5 +769,20 @@ mod tests {
             "qwert"
         );
         assert_eq!(normalize_keyboard_layout_input("abc", "system"), "abc");
+    }
+
+    #[test]
+    fn maps_colemak_output_to_qwerty_input() {
+        // Colemak f→e, p→r, g→t, j→y, l→u, u→i
+        assert_eq!(
+            normalize_keyboard_layout_input("fpgjlu", "colemak_qwerty"),
+            "ertyui"
+        );
+        // Colemak n→j, e→k, i→l
+        assert_eq!(
+            normalize_keyboard_layout_input("nei", "colemak_qwerty"),
+            "jkl"
+        );
+        assert_eq!(normalize_keyboard_layout_input("abc", "colemak_qwerty"), "abc");
     }
 }
