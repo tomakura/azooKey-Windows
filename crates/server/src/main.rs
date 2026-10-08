@@ -127,7 +127,7 @@ impl AzookeyService for MyAzookeyService {
             .creation_flags(0x08000000);
         let pid = restart::spawn_replacement(&mut pending, command).map_err(|error| {
             if error.kind() == std::io::ErrorKind::AlreadyExists {
-                Status::failed_precondition(error.to_string())
+                Status::already_exists(error.to_string())
             } else {
                 Status::internal(format!("Failed to start replacement engine: {error}"))
             }

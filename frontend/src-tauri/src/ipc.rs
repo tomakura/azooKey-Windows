@@ -18,53 +18,142 @@ pub fn is_connection_error(error: &anyhow::Error) -> bool {
         })
 }
 
-/// Restart a running engine or start an offline one, then connect to a new PID within twenty seconds.
-pub fn restart_engine(service: Option<IPCService>, directory: &Path) -> Result<IPCService> {
-    let mut service = service.or_else(|| IPCService::new().ok());
-    let previous = match service.as_mut().map(|service| service.process_id()) {
-        Some(Ok(pid)) => Some(pid),
-        Some(Err(error)) if !is_connection_error(&error) => return Err(error),
-        _ => None,
+/// Report whether a connection failure proves that the named pipe is absent.
+fn is_engine_absent(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause.downcast_ref::<std::io::Error>().is_some_and(|error| {
+            error.raw_os_error() == Some(windows::Win32::Foundation::ERROR_FILE_NOT_FOUND.0 as i32)
+        })
+    })
+}
+
+/// Check the cached engine PID without relying on an RPC response; ambiguous failures are errors.
+fn engine_process_is_alive(pid: u32) -> Result<bool> {
+    use windows::Win32::{
+        Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0, WAIT_TIMEOUT},
+        System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE},
     };
-    let mut child = None;
-    if previous.is_some() {
-        if let Err(error) = service.as_mut().unwrap().request_restart() {
-            if !is_connection_error(&error) {
-                return Err(error);
-            }
-        }
-    } else {
-        use std::os::windows::process::CommandExt;
-        child = Some(
-            shared::server_process::server_command(
-                directory,
-                &shared::AppConfig::read().zenzai.backend,
-            )?
-            .creation_flags(0x08000000)
-            .spawn()?,
-        );
+    let handle = match unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) } {
+        Ok(handle) => handle,
+        Err(error) if error.code() == ERROR_INVALID_PARAMETER.to_hresult() => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    let state = unsafe { WaitForSingleObject(handle, 0) };
+    unsafe { CloseHandle(handle)? };
+    match state {
+        WAIT_TIMEOUT => Ok(true),
+        WAIT_OBJECT_0 => Ok(false),
+        _ => Err(windows::core::Error::from_win32().into()),
     }
-    // Discard the old HTTP/2 channel; reconnect to the replacement explicitly.
+}
+
+/// Interpret the server's explicit duplicate-restart response as an already accepted launch.
+fn is_restart_in_progress(error: &anyhow::Error) -> bool {
+    error
+        .downcast_ref::<tonic::Status>()
+        .is_some_and(|status| status.code() == tonic::Code::AlreadyExists)
+}
+
+/// Restart or recover an engine while retaining its known PID across transient connection errors.
+pub fn restart_engine(service: Option<IPCService>, directory: &Path) -> Result<IPCService> {
+    let mut service = match service {
+        Some(service) => Some(service),
+        None => match IPCService::new() {
+            Ok(service) => Some(service),
+            Err(error) if is_engine_absent(&error) => None,
+            Err(error) => return Err(error),
+        },
+    };
+    let mut previous = service.as_ref().map(|service| service.last_process_id);
+    let mut accepted = false;
+    if let Some(service) = service.as_mut() {
+        match service.request_restart() {
+            Ok(pid) => {
+                previous = Some(pid);
+                accepted = true;
+            }
+            Err(error) if is_restart_in_progress(&error) => accepted = true,
+            Err(error) if is_connection_error(&error) => {}
+            Err(error) => return Err(error),
+        }
+    }
     drop(service);
-    let deadline = std::time::Instant::now() + Duration::from_secs(20);
-    let mut last_error = "新しい変換エンジンの応答を待っています".to_string();
-    while std::time::Instant::now() < deadline {
-        if let Some(child) = child.as_mut() {
-            if let Some(status) = child.try_wait()? {
-                anyhow::bail!("変換エンジンが起動直後に終了しました: {status}。バックエンドとドライバーを確認してください");
+    let started = std::time::Instant::now();
+    let deadline = started + Duration::from_secs(20);
+    let mut child: Option<std::process::Child> = None;
+    // Keep all errors inside this closure so a child started here is reaped on failure.
+    let result = (|| -> Result<IPCService> {
+        let mut last_error = "新しい変換エンジンの応答を待っています".to_string();
+        while std::time::Instant::now() < deadline {
+            if let Some(child) = child.as_mut() {
+                if let Some(status) = child.try_wait()? {
+                    anyhow::bail!("変換エンジンが起動直後に終了しました: {status}。バックエンドとドライバーを確認してください");
+                }
             }
+            match IPCService::new() {
+                Ok(mut service) => {
+                    let pid = service.last_process_id;
+                    if previous.is_none() && child.is_none() {
+                        // An engine appeared before we launched anything; restart it rather than
+                        // treating its first successful connection as a completed restart.
+                        previous = Some(pid);
+                    }
+                    if Some(pid) != previous {
+                        // Offline recovery must connect to the exact process we started.
+                        if child.as_ref().is_none_or(|child| child.id() == pid) {
+                            return Ok(service);
+                        }
+                        last_error = "起動した変換エンジンと接続先が一致しません".into();
+                    } else if !accepted {
+                        match service.request_restart() {
+                            Ok(pid) => {
+                                previous = Some(pid);
+                                accepted = true;
+                            }
+                            Err(error) if is_restart_in_progress(&error) => accepted = true,
+                            Err(error) if is_connection_error(&error) => {
+                                last_error = error.to_string()
+                            }
+                            Err(error) => return Err(error),
+                        }
+                    }
+                }
+                Err(error) => {
+                    let absent = is_engine_absent(&error);
+                    last_error = error.to_string();
+                    // A lost reply may still have launched a successor. Allow it time to appear.
+                    let can_recover =
+                        previous.is_none() || started.elapsed() >= Duration::from_secs(3);
+                    if absent && !accepted && child.is_none() && can_recover {
+                        let alive = previous
+                            .map(engine_process_is_alive)
+                            .transpose()?
+                            .unwrap_or(false);
+                        if !alive {
+                            use std::os::windows::process::CommandExt;
+                            child = Some(
+                                shared::server_process::server_command(
+                                    directory,
+                                    &shared::AppConfig::read().zenzai.backend,
+                                )?
+                                .creation_flags(0x08000000)
+                                .spawn()?,
+                            );
+                        }
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
-        match IPCService::new() {
-            Ok(mut service) => match service.process_id() {
-                Ok(pid) if Some(pid) != previous => return Ok(service),
-                Ok(_) => {}
-                Err(error) => last_error = error.to_string(),
-            },
-            Err(error) => last_error = error.to_string(),
+        anyhow::bail!("変換エンジンの再起動を確認できませんでした: {last_error}")
+    })();
+    if result.is_err() {
+        if let Some(mut child) = child {
+            let _ = child.kill();
+            let _ = child.wait();
         }
-        std::thread::sleep(Duration::from_millis(100));
     }
-    anyhow::bail!("変換エンジンの再起動を確認できませんでした: {last_error}")
+    result
 }
 
 // connect to kkc server
@@ -73,6 +162,7 @@ pub struct IPCService {
     // kkc server client
     azookey_client: AzookeyServiceClient<tonic::transport::channel::Channel>,
     runtime: Arc<tokio::runtime::Runtime>,
+    last_process_id: u32,
 }
 
 impl IPCService {
@@ -101,10 +191,13 @@ impl IPCService {
 
         let azookey_client = AzookeyServiceClient::new(server_channel);
 
-        Ok(Self {
+        let mut service = Self {
             azookey_client,
             runtime: Arc::new(runtime),
-        })
+            last_process_id: 0,
+        };
+        service.process_id()?;
+        Ok(service)
     }
 }
 
@@ -116,7 +209,9 @@ impl IPCService {
             self.azookey_client
                 .engine_status(shared::proto::EngineStatusRequest {}),
         )?;
-        Ok(response.into_inner().process_id)
+        let pid = response.into_inner().process_id;
+        self.last_process_id = pid;
+        Ok(pid)
     }
 
     /// Request replacement and return the old PID once the server has accepted the launch.
@@ -144,5 +239,84 @@ impl IPCService {
             .block_on(self.azookey_client.reset_learning(request))?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Distinguish a live process from an exited process even while its handle is retained.
+    #[test]
+    fn process_probe_distinguishes_live_and_exited_processes() {
+        assert!(engine_process_is_alive(std::process::id()).unwrap());
+        let mut child = std::process::Command::new("cmd")
+            .args(["/C", "exit", "0"])
+            .spawn()
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+        assert!(!engine_process_is_alive(child.id()).unwrap());
+    }
+
+    struct TestEngine(u32);
+
+    impl Drop for TestEngine {
+        /// Stop only the engine obtained from this test's isolated pipe.
+        fn drop(&mut self) {
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/PID", &self.0.to_string()])
+                .status();
+        }
+    }
+
+    /// An expired RPC on a live engine must neither report the old PID as a restart nor orphan a child.
+    #[test]
+    #[ignore = "requires the staged Windows engine and CPU model"]
+    fn restart_recovers_from_a_transient_rpc_failure() {
+        let directory =
+            std::path::PathBuf::from(std::env::var_os("AZOOKEY_TEST_RESOURCES").unwrap());
+        let appdata =
+            std::env::temp_dir().join(format!("azookey-rpc-timeout-{}", std::process::id()));
+        std::env::set_var("APPDATA", &appdata);
+        std::env::set_var(
+            "AZOOKEY_INSTANCE",
+            format!("_rpc_timeout_{}", std::process::id()),
+        );
+        let mut config = shared::AppConfig::new();
+        config.zenzai.backend = "cpu".into();
+        config.try_write().unwrap();
+        let mut service = restart_engine(None, &directory).unwrap();
+        let previous = service.process_id().unwrap();
+        let mut engine = TestEngine(previous);
+        let channel = service
+            .runtime
+            .block_on(
+                Endpoint::from_static("http://localhost")
+                    .connect_timeout(Duration::from_secs(2))
+                    .timeout(Duration::ZERO)
+                    .connect_with_connector(service_fn(|_| async {
+                        let client = loop {
+                            match ClientOptions::new().open(shared::pipe_path("azookey_server")) {
+                                Ok(client) => break client,
+                                Err(error)
+                                    if error.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32) => {}
+                                Err(error) => return Err(error),
+                            }
+                            time::sleep(Duration::from_millis(50)).await;
+                        };
+                        Ok::<_, std::io::Error>(TokioIo::new(client))
+                    })),
+            )
+            .unwrap();
+        service.azookey_client = AzookeyServiceClient::new(channel);
+        assert!(service.process_id().is_err());
+        assert_eq!(service.last_process_id, previous);
+        let mut service = restart_engine(Some(service), &directory).unwrap();
+        engine.0 = service.process_id().unwrap();
+        assert_ne!(engine.0, previous);
+        assert!(!engine_process_is_alive(previous).unwrap());
+        drop(service);
+        drop(engine);
+        std::fs::remove_dir_all(appdata).unwrap();
     }
 }

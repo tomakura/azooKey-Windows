@@ -54,7 +54,11 @@ jobs:
       run: choco install innosetup --yes --no-progress
 
     - name: Install cargo-make
-      run: cargo install --force cargo-make
+      run: |
+        if (!(Get-Command cargo-make -ErrorAction SilentlyContinue)) {
+          cargo install --locked cargo-make
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
 
     - name: Download prebuilt llama
       run: |
@@ -117,6 +121,8 @@ jobs:
           swift test -c release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         } finally { Pop-Location }
+        cargo test -p azookey-server --example engine_lifecycle -- --include-ignored --nocapture
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         cargo run -p azookey-server --example engine_lifecycle
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $hash = (Get-FileHash build/azookey-setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -171,6 +177,12 @@ jobs:
           exit 0
         }
         if ($matching.Count -gt 0) {
+          # Resolve annotated tags to their commit as well as lightweight tags.
+          $tagCommit = & gh api "repos/$env:GITHUB_REPOSITORY/commits/$tag" --jq '.sha' 2>&1
+          if ($LASTEXITCODE -ne 0) { throw ($tagCommit -join "`n") }
+          if (($tagCommit -join "`n").Trim() -ne $env:GITHUB_SHA) {
+            throw 'Draft tag and verified installer refer to different commits; refusing to replace assets'
+          }
           # A previous upload may have stopped halfway; repair both assets before publishing.
           gh release upload $tag release-assets/azookey-setup.exe release-assets/azookey-setup.exe.sha256 --clobber
         } else {
