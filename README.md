@@ -12,7 +12,7 @@
 
 # 最新の配布版: 0.1.0-alpha.9
 
-[alpha.9のダウンロードと変更点](https://github.com/tomakura/azooKey-Windows/releases/tag/v0.1.0-alpha.9)
+[alpha.9のダウンロード](https://github.com/tomakura/azooKey-Windows/releases/tag/v0.1.0-alpha.9)
 
 - 標準ローマ字入力で日本語文中の英単語を保持します。例: `kyouhagoogledekensaku` → Spaceで`今日はgoogleで検索`。かな入力と区別しにくい綴りはかなを優先します。
 - ライブ変換は初期状態でオフです。Spaceで通常変換、Tabで予測候補を選択します。入力中の予測は別処理で生成し、本文へ自動挿入しません。
@@ -54,7 +54,7 @@
 
 バックエンドの変更後は、設定画面の「全般」から「変換エンジンを再起動」を押してください。モデル、辞書、実行ファイルが不足している場合はエラーを表示します。
 
-alpha.6では、WindowsでCUDA/Vulkanを選んでもモデルがCPU側に置かれていた設定を修正し、GPU対応バックエンドで全層をGPUへ配置します。GPU用の推論バッファも変換間で再利用し、文脈だけを消去します。同じモデルと推論回数でSpace変換の待ち時間を短縮します。計測条件と結果は[検証記録](docs/verification.md)を参照してください。
+CUDA/Vulkanではモデル全層をGPUへ配置し、推論バッファを変換間で再利用します。計測条件と結果は[検証記録](docs/verification.md)を参照してください。
 
 ### 個人最適化
 
