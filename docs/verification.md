@@ -189,6 +189,25 @@ RTX 4070 Ti / CUDAでの比較:
 - 証跡: `safe-clauses.log`、`swift-clauses-build.log`、`clauses-engine-tests.log`、`clauses-engine-{cpu,vulkan}.log`、`inference-clauses-idle-{before,after}-cuda/results.json`、`inference-clauses-input_latency-cuda/results.json`（`target/verification`内）。
 - 更新インストールと、再サインイン後のメモ帳・32bitアプリでの文節選択表示、左右移動、Shift＋左右、変換・無変換キーの実入力確認は残る。検証時点のインストール済み版はalpha.7だった。
 
+## alpha.9: 英日混在入力
+
+- Meltypeの英日混在入力の方針を参考に、SCOWLの英単語辞書を利用した独立の区間判定を標準ローマ字入力へ接続した。Meltypeのプログラム、GPLの辞書や生成スクリプトは取り込んでいない。SCOWLの39,095語のデータと出典、原ライセンス全文を同梱する。AZIKとカスタム入力表は既存の解釈を保つ。
+- `windowswotsukaimasu` → `windowsを使います`、`kyouhagoogledekensaku` → `今日はgoogleで検索`、`ashitameetinggaaru` → `明日meetingがある`、`pythonnobug` → `pythonのbug`、`kyouhagithub` → `今日はgithub`が先頭候補になることを最終配布サーバーで確認した。原ローマ字・未確定の全文を保持し、混在文末の英語を理由に全文ローマ字候補を先頭へ上げない。
+- `make`や`sushi`などかな入力にもなる一般語はかなを優先する。英語の完全な自動判別を保証するものではなく、未登録語や曖昧な語には元の綴り候補・F10・Shiftで始める英字入力を使える。
+- 当初は全文走査により240キー入力で最大10.49msまで増加したため、英単語を前方一致索引で検索し、実際のかな境界から末尾を再判定するよう変更した。長文3パターンの全打鍵位置で、一括判定と同じ読み・元ローマ字になることをSwiftテストで確認した。日本語文、かな境界、英語末尾のn、Unicode、部分確定と削除後の追加入力も検証した。入力編集ではモデルを実行しない。
+- 最終Swiftテスト2件と実Swift FFIのサーバーテスト2件が成功した。標準チェック（共有設定2件、変換ライブラリ21件、クライアント15件、フロントエンド4件、workspace clippy/check、x64/x86、設定画面ビルド）が成功した。既存44例の先頭一致44/44を維持した。この小規模セットは一般的な変換精度の保証ではない。
+- 最終配布バイナリで並行予測を伴う240キーの入力RPCは中央値0.7069ms、95パーセンタイル1.1784ms、最大1.4403msだった。TSFの実打鍵・ネイティブアプリ描画を含まない。CUDA/Vulkanとも全13層のGPU配置を確認し、Vulkanの44例も先頭44/44を維持した。条件はRTX 4070 Ti、推論回数2、ライブ変換・学習オフ。
+- ビルド終了後の同条件のCUDA比較では、alpha.8が中央値48.20ms・95パーセンタイル61.05ms、alpha.9が39.73ms・57.37msだった。この変更でモデルや推論回数は変更しておらず、この差をモデルの高速化とは扱わない。
+- 証跡: `target/verification/swift-mixed-tests.log`、`safe-mixed.log`、`mixed-engine-tests.log`、`inference-alpha9-packaged-input-cuda/results.json`、`inference-alpha9-packaged-quality-vulkan/results.json`、`inference-mixed-idle-{before,after}-cuda/results.json`。最終配布物の検証結果は以下に記録する。
+
+## alpha.9の配布物
+
+- 版: `0.1.0-alpha.9`
+- インストーラー: `build/azookey-setup.exe` (511529716 bytes)
+- SHA256: `3B73AEACEB2D7831B3DF1121228000AF56E3E3D4D51F9D8DA80610EAAACA7DE9`
+- SCOWL辞書・出典・原ライセンスを含む3,475ファイルのハッシュ、サイズ、x64/x86構成と必要リソースを照合した。Inno Setupの生成と最終EXEの版番号を確認した（`target/verification/installer-alpha9.log`、`installer-alpha9-artifact.json`）。alpha.8のインストーラーは`target/verification/azookey-setup-alpha8.exe`へ保管した。
+- この版のインストールは実行していない。確認時点のインストール済みはalpha.7。更新・再サインイン後、メモ帳と32bitアプリで英日混在、部分変換と文節移動・伸縮、変換/無変換キーの実入力確認が残る。自動検証の完了を、プロジェクト全体の実機検証完了とは扱わない。
+
 ## alpha.8の配布物
 
 - 版: `0.1.0-alpha.8`

@@ -161,6 +161,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "Missing {expected_text}: {:?}",
                 result.suggestions
             );
+            let first = result
+                .suggestions
+                .first()
+                .ok_or("Missing mixed candidate")?;
+            assert_eq!(format!("{}{}", first.text, first.subtext), expected_text);
             let remaining = client
                 .append_text(AppendTextRequest {
                     text_to_append: String::new(),
