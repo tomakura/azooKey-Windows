@@ -1,130 +1,27 @@
+mod engine;
+
 use azookey_server::TonicNamedPipeServer;
+use engine::Engine;
+use shared::proto::azookey_service_server::{AzookeyService, AzookeyServiceServer};
+use shared::proto::*;
+use std::sync::Mutex;
 use tonic::{transport::Server, Request, Response, Status};
 use tonic_reflection::server::Builder as ReflectionBuilder;
 
-use shared::proto::azookey_service_server::{AzookeyService, AzookeyServiceServer};
-use shared::proto::{
-    AppendTextRequest, AppendTextResponse, ClearTextRequest, ClearTextResponse,
-    CommitCandidateRequest, CommitCandidateResponse, ComposingText, MoveCursorRequest,
-    MoveCursorResponse, RemoveTextRequest, RemoveTextResponse, ResetLearningRequest,
-    ResetLearningResponse, ShrinkTextRequest, ShrinkTextResponse, Suggestion,
-};
+static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
 
-use std::ffi::{c_char, c_int, CStr, CString};
-use std::sync::Mutex;
-
-const USE_ZENZAI: bool = true;
-
-#[derive(Debug, Clone)]
-#[repr(C)]
-struct FFICandidate {
-    text: *mut c_char,
-    subtext: *mut c_char,
-    hiragana: *mut c_char,
-    corresponding_count: c_int,
-}
-
-unsafe extern "C" {
-    fn Initialize(path: *const c_char, use_zenzai: bool);
-    fn SetContext(context: *const c_char);
-    fn AppendText(input: *const c_char, cursorPtr: *mut c_int) -> *mut c_char;
-    fn RemoveText(cursorPtr: *mut c_int) -> *mut c_char;
-    fn MoveCursor(offset: c_int, cursorPtr: *mut c_int) -> *mut c_char;
-    fn ShrinkText(offset: c_int) -> *mut c_char;
-    fn ClearText();
-    fn GetComposedText(lengthPtr: *mut c_int) -> *mut *mut FFICandidate;
-    fn LoadConfig();
-    fn ResetLearning();
-}
-
-// The Swift engine keeps global state, so serialize all FFI access.
-static ENGINE_LOCK: Mutex<()> = Mutex::new(());
-
-fn with_engine<T>(action: impl FnOnce() -> T) -> T {
-    let _guard = ENGINE_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    action()
-}
-
-fn initialize(path: &str) {
-    let path = CString::new(path).expect("CString::new failed");
-    with_engine(|| unsafe { Initialize(path.as_ptr(), USE_ZENZAI) });
-}
-
-fn add_text(input: &str) -> String {
-    let input = CString::new(input).unwrap_or_default();
-    with_engine(|| unsafe {
-        let mut cursor: c_int = 0;
-        let result = AppendText(input.as_ptr(), &mut cursor);
-        CStr::from_ptr(result).to_string_lossy().into_owned()
-    })
-}
-
-fn move_cursor(offset: i32) -> String {
-    with_engine(|| unsafe {
-        let mut cursor: c_int = 0;
-        let result = MoveCursor(offset, &mut cursor);
-        CStr::from_ptr(result).to_string_lossy().into_owned()
-    })
-}
-
-fn remove_text() -> String {
-    with_engine(|| unsafe {
-        let mut cursor: c_int = 0;
-        let result = RemoveText(&mut cursor);
-        CStr::from_ptr(result).to_string_lossy().into_owned()
-    })
-}
-
-fn clear_text() {
-    with_engine(|| unsafe { ClearText() });
-}
-
-fn reset_learning() {
-    with_engine(|| unsafe { ResetLearning() });
-}
-
-fn shrink_text(offset: i32) -> String {
-    with_engine(|| unsafe {
-        let result = ShrinkText(offset);
-        CStr::from_ptr(result).to_string_lossy().into_owned()
-    })
-}
-
-fn get_composed_text() -> Vec<Suggestion> {
-    with_engine(|| unsafe {
-        let mut length: c_int = 0;
-        let result = GetComposedText(&mut length);
-        let mut suggestions: Vec<Suggestion> = Vec::with_capacity(length as usize);
-
-        for index in 0..length as usize {
-            let candidate = (**result.add(index)).clone();
-            let text = CStr::from_ptr(candidate.text)
-                .to_string_lossy()
-                .into_owned();
-            let subtext = CStr::from_ptr(candidate.subtext)
-                .to_string_lossy()
-                .into_owned();
-            let corresponding_count = candidate.corresponding_count;
-
-            if suggestions.iter().any(|s| s.text == text) {
-                continue;
-            }
-            suggestions.push(Suggestion {
-                text,
-                subtext,
-                corresponding_count,
-            });
-        }
-
-        suggestions
-    })
-}
-
-fn composing_text_response(hiragana: String) -> ComposingText {
-    ComposingText {
-        hiragana,
-        suggestions: get_composed_text(),
-    }
+#[allow(
+    clippy::result_large_err,
+    reason = "Use tonic's RPC error type at the service boundary"
+)]
+fn with_engine<T>(action: impl FnOnce(&mut Engine) -> Result<T, String>) -> Result<T, Status> {
+    let mut guard = ENGINE
+        .lock()
+        .map_err(|_| Status::internal("Engine mutex poisoned"))?;
+    let engine = guard
+        .as_mut()
+        .ok_or_else(|| Status::unavailable("Engine not initialized"))?;
+    action(engine).map_err(Status::internal)
 }
 
 #[derive(Debug, Default)]
@@ -136,11 +33,10 @@ impl AzookeyService for MyAzookeyService {
         &self,
         request: Request<AppendTextRequest>,
     ) -> Result<Response<AppendTextResponse>, Status> {
-        let input = request.into_inner().text_to_append;
-        let hiragana = add_text(&input);
-
+        let text = request.into_inner().text_to_append;
+        let composing_text = with_engine(|engine| engine.append(&text))?;
         Ok(Response::new(AppendTextResponse {
-            composing_text: Some(composing_text_response(hiragana)),
+            composing_text: Some(composing_text),
         }))
     }
 
@@ -148,10 +44,9 @@ impl AzookeyService for MyAzookeyService {
         &self,
         _: Request<RemoveTextRequest>,
     ) -> Result<Response<RemoveTextResponse>, Status> {
-        let hiragana = remove_text();
-
+        let composing_text = with_engine(|engine| engine.remove())?;
         Ok(Response::new(RemoveTextResponse {
-            composing_text: Some(composing_text_response(hiragana)),
+            composing_text: Some(composing_text),
         }))
     }
 
@@ -160,10 +55,9 @@ impl AzookeyService for MyAzookeyService {
         request: Request<MoveCursorRequest>,
     ) -> Result<Response<MoveCursorResponse>, Status> {
         let offset = request.into_inner().offset;
-        let hiragana = move_cursor(offset);
-
+        let composing_text = with_engine(|engine| engine.move_cursor(offset))?;
         Ok(Response::new(MoveCursorResponse {
-            composing_text: Some(composing_text_response(hiragana)),
+            composing_text: Some(composing_text),
         }))
     }
 
@@ -171,7 +65,10 @@ impl AzookeyService for MyAzookeyService {
         &self,
         _: Request<ClearTextRequest>,
     ) -> Result<Response<ClearTextResponse>, Status> {
-        clear_text();
+        with_engine(|engine| {
+            engine.clear();
+            Ok(())
+        })?;
         Ok(Response::new(ClearTextResponse {}))
     }
 
@@ -180,42 +77,35 @@ impl AzookeyService for MyAzookeyService {
         request: Request<ShrinkTextRequest>,
     ) -> Result<Response<ShrinkTextResponse>, Status> {
         let offset = request.into_inner().offset;
-        let hiragana = shrink_text(offset);
-
+        let composing_text = with_engine(|engine| engine.shrink(offset))?;
         Ok(Response::new(ShrinkTextResponse {
-            composing_text: Some(composing_text_response(hiragana)),
+            composing_text: Some(composing_text),
         }))
     }
 
     async fn set_context(
         &self,
-        request: Request<shared::proto::SetContextRequest>,
-    ) -> Result<Response<shared::proto::SetContextResponse>, Status> {
+        request: Request<SetContextRequest>,
+    ) -> Result<Response<SetContextResponse>, Status> {
         let context = request.into_inner().context;
-        let trimmed_context = context
-            .split('\r')
-            .rfind(|s| !s.is_empty())
-            .unwrap_or_default()
-            .to_string();
-
-        let context = CString::new(trimmed_context).unwrap_or_default();
-        with_engine(|| unsafe { SetContext(context.as_ptr()) });
-        Ok(Response::new(shared::proto::SetContextResponse {}))
+        with_engine(|engine| engine.set_context(&context))?;
+        Ok(Response::new(SetContextResponse {}))
     }
 
     async fn update_config(
         &self,
-        _: Request<shared::proto::UpdateConfigRequest>,
-    ) -> Result<Response<shared::proto::UpdateConfigResponse>, Status> {
-        with_engine(|| unsafe { LoadConfig() });
-        Ok(Response::new(shared::proto::UpdateConfigResponse {}))
+        _: Request<UpdateConfigRequest>,
+    ) -> Result<Response<UpdateConfigResponse>, Status> {
+        with_engine(|engine| engine.reload())?;
+        Ok(Response::new(UpdateConfigResponse {}))
     }
 
     async fn commit_candidate(
         &self,
-        _: Request<CommitCandidateRequest>,
+        request: Request<CommitCandidateRequest>,
     ) -> Result<Response<CommitCandidateResponse>, Status> {
-        // The Swift converter learns automatically during requestCandidates; accept and ignore.
+        let request = request.into_inner();
+        with_engine(|engine| engine.commit(&request.reading, &request.text))?;
         Ok(Response::new(CommitCandidateResponse {}))
     }
 
@@ -223,7 +113,10 @@ impl AzookeyService for MyAzookeyService {
         &self,
         _: Request<ResetLearningRequest>,
     ) -> Result<Response<ResetLearningResponse>, Status> {
-        reset_learning();
+        with_engine(|engine| {
+            engine.reset_learning();
+            Ok(())
+        })?;
         Ok(Response::new(ResetLearningResponse {}))
     }
 }
@@ -235,22 +128,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parent_dir = current_exe
         .parent()
         .ok_or("Failed to resolve server directory")?;
-    initialize(&parent_dir.to_string_lossy());
-
-    let service = MyAzookeyService;
-
+    let engine = Engine::new(parent_dir).map_err(std::io::Error::other)?;
+    *ENGINE.lock().map_err(|_| "Engine mutex poisoned")? = Some(engine);
     println!("AzookeyServer listening");
-
     Server::builder()
-        .add_service(AzookeyServiceServer::new(service))
+        .add_service(AzookeyServiceServer::new(MyAzookeyService))
         .add_service(
             ReflectionBuilder::configure()
                 .register_encoded_file_descriptor_set(shared::proto::FILE_DESCRIPTOR_SET)
-                .build_v1()
-                .unwrap(),
+                .build_v1()?,
         )
         .serve_with_incoming(TonicNamedPipeServer::new("azookey_server"))
         .await?;
-
     Ok(())
 }

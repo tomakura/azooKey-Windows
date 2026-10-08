@@ -17,6 +17,12 @@ fn get_config_root() -> PathBuf {
 
 const SETTINGS_FILENAME: &str = "settings.json";
 
+/// Independent verification processes use a separate instance without touching the installed IME.
+pub fn pipe_path(name: &str) -> String {
+    let instance = std::env::var("AZOOKEY_INSTANCE").unwrap_or_default();
+    format!(r"\\.\pipe\{name}{instance}")
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ZenzaiConfig {
     #[serde(default)]
@@ -248,15 +254,17 @@ fn default_text_color() -> String {
 }
 
 impl AppConfig {
-    pub fn write(&self) {
+    pub fn try_write(&self) -> std::io::Result<()> {
         let config_path = get_config_root().join(SETTINGS_FILENAME);
-        let Ok(config_str) = serde_json::to_string_pretty(self) else {
-            return;
-        };
-        if let Some(parent) = config_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+        let config_str = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        std::fs::create_dir_all(get_config_root())?;
+        std::fs::write(config_path, config_str)
+    }
+
+    pub fn write(&self) {
+        if let Err(error) = self.try_write() {
+            eprintln!("Failed to save settings: {error}");
         }
-        let _ = std::fs::write(config_path, config_str);
     }
 
     pub fn read() -> Self {

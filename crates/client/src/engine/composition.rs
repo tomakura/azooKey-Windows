@@ -182,9 +182,8 @@ impl TextServiceFactory {
         };
 
         let action = UserAction::try_from(wparam.0)?;
-        let candidate_number_selection = shared::AppConfig::read()
-            .conversion
-            .candidate_number_selection;
+        let conversion_config = shared::AppConfig::read().conversion;
+        let candidate_number_selection = conversion_config.candidate_number_selection;
 
         let (transition, actions) = match composition.state {
             CompositionState::None => match action {
@@ -283,6 +282,10 @@ impl TextServiceFactory {
                         ClientAction::EndComposition,
                         ClientAction::SetIMEMode(InputMode::Latin),
                     ],
+                ),
+                UserAction::Space | UserAction::Tab if !conversion_config.live_conversion => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetSelection(SetSelectionType::Number(0))],
                 ),
                 UserAction::Space | UserAction::Tab => (
                     CompositionState::Previewing,
@@ -522,11 +525,19 @@ impl TextServiceFactory {
                     };
 
                     candidates = ipc_service.append_text(text.clone())?;
+                    selection_index = 0;
                     let text = candidates.texts[selection_index as usize].clone();
                     let sub_text = candidates.sub_texts[selection_index as usize].clone();
                     let hiragana = candidates.hiragana.clone();
 
                     corresponding_count = candidates.corresponding_count[selection_index as usize];
+
+                    let (text, sub_text) = if !app_config.conversion.live_conversion {
+                        corresponding_count = hiragana.chars().count() as i32;
+                        (hiragana.clone(), String::new())
+                    } else {
+                        (text, sub_text)
+                    };
 
                     preview = text.clone();
                     suffix = sub_text.clone();
@@ -555,6 +566,13 @@ impl TextServiceFactory {
                         .get(selection_index as usize)
                         .cloned()
                         .unwrap_or(0);
+
+                    let (text, sub_text) = if !app_config.conversion.live_conversion {
+                        corresponding_count = hiragana.chars().count() as i32;
+                        (hiragana.clone(), String::new())
+                    } else {
+                        (text, sub_text)
+                    };
 
                     raw_input = raw_input
                         .chars()
@@ -692,6 +710,12 @@ impl TextServiceFactory {
                     self.shift_start(&preview, &text)?;
 
                     corresponding_count = candidates.corresponding_count[selection_index as usize];
+                    let (text, sub_text) = if !app_config.conversion.live_conversion {
+                        corresponding_count = hiragana.chars().count() as i32;
+                        (hiragana.clone(), String::new())
+                    } else {
+                        (text, sub_text)
+                    };
                     preview = text.clone();
                     suffix = sub_text.clone();
                     raw_hiragana = hiragana.clone();
@@ -783,6 +807,9 @@ mod tests {
             normalize_keyboard_layout_input("nei", "colemak_qwerty"),
             "jkl"
         );
-        assert_eq!(normalize_keyboard_layout_input("abc", "colemak_qwerty"), "abc");
+        assert_eq!(
+            normalize_keyboard_layout_input("abc", "colemak_qwerty"),
+            "abc"
+        );
     }
 }

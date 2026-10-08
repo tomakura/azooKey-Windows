@@ -603,6 +603,82 @@ fn run_magic_conversion_command(
     read_child_with_timeout(&mut child, config.timeout_ms)
 }
 
+/// External conversion providers use a strict contract: failures are reported to the caller.
+pub fn external_candidates(
+    command_path: &Path,
+    timeout_ms: u64,
+    context: &str,
+    reading: &str,
+) -> Result<Vec<Candidate>, String> {
+    let mut command = Command::new(command_path);
+    command
+        .arg("--reading")
+        .arg(reading)
+        .arg("--context")
+        .arg(context)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Conversion provider: {error}"))?;
+    let stdout = child.stdout.take().ok_or("Missing provider stdout")?;
+    let stderr = child.stderr.take().ok_or("Missing provider stderr")?;
+    // Drain pipes concurrently so a provider cannot block on a full output buffer.
+    let output_thread = std::thread::spawn(move || {
+        let mut output = String::new();
+        BufReader::new(stdout)
+            .take(1024 * 1024)
+            .read_to_string(&mut output)
+            .map(|_| output)
+    });
+    let error_thread = std::thread::spawn(move || {
+        let mut output = String::new();
+        BufReader::new(stderr)
+            .take(1024 * 1024)
+            .read_to_string(&mut output)
+            .map(|_| output)
+    });
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) if started.elapsed() >= Duration::from_millis(timeout_ms) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err("Conversion provider timed out".to_string());
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(error) => break Err(error.to_string()),
+        }
+    };
+    let output = output_thread
+        .join()
+        .map_err(|_| "Provider output reader panicked")?
+        .map_err(|error| error.to_string())?;
+    let error = error_thread
+        .join()
+        .map_err(|_| "Provider error reader panicked")?
+        .map_err(|error| error.to_string())?;
+    let status = status?;
+    if !status.success() {
+        return Err(format!("Conversion provider exited with {status}: {error}"));
+    }
+    let candidates = magic_candidates_from_output(&output, reading);
+    if candidates.is_empty() {
+        return Err("Conversion provider returned no candidates".to_string());
+    }
+    Ok(candidates)
+}
+
+pub fn dynamic_candidates(reading: &str) -> Vec<Candidate> {
+    DynamicDictionary::lookup_best_prefixes(reading)
+}
+
 fn zenzai_candidates_from_output(output: &str, hiragana: &str) -> Vec<Candidate> {
     output
         .lines()
@@ -644,10 +720,7 @@ fn run_zenzai_command(config: &ZenzaiConfig, prompt: String, limit: usize) -> Op
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_millis(config.timeout_ms))
         .build();
-    let response = agent
-        .post(&url)
-        .send_json(body)
-        .ok()?;
+    let response = agent.post(&url).send_json(body).ok()?;
     let json: serde_json::Value = response.into_json().ok()?;
     json.get("content")?.as_str().map(String::from)
 }
@@ -2016,7 +2089,8 @@ mod tests {
             .join("azooKey_dictionary_storage");
         let mut converter = NativeConverter::load(resource_dir);
 
+        // The auxiliary CSV contains corpus entries; full conversion uses the Swift LOUDS dictionary.
         let candidates = converter.append_text("kaku");
-        assert!(candidates.iter().any(|candidate| candidate.text == "書く"));
+        assert!(candidates.iter().any(|candidate| candidate.text == "各"));
     }
 }

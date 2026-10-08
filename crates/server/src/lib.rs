@@ -69,7 +69,7 @@ impl TonicNamedPipeServer {
         // set security attributes to allow ipc from sandboxed processes
         // see https://nathancorvussolis.blogspot.com/2018/05/windows-ime-security.html
 
-        let name = format!("\\\\.\\pipe\\{}", path);
+        let name = shared::pipe_path(path);
 
         let mut security_descriptor = PSECURITY_DESCRIPTOR::default();
 
