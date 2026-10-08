@@ -664,6 +664,13 @@ fn key_actions(
     mut action: UserAction,
     conversion_config: shared::ConversionConfig,
 ) -> Result<Option<(Vec<ClientAction>, CompositionState)>> {
+    if matches!(action, UserAction::Henkan) {
+        action = if composition.state == CompositionState::None {
+            UserAction::SetInputMode(InputMode::Kana)
+        } else {
+            UserAction::Space
+        };
+    }
     if matches!(action, UserAction::Muhenkan) {
         if conversion_config.muhenkan_action == "latin" {
             action = UserAction::SetInputMode(InputMode::Latin);
@@ -1113,6 +1120,38 @@ mod tests {
             ]
         );
         assert_eq!(transition, CompositionState::None);
+    }
+
+    #[test]
+    fn henkan_enables_japanese_when_idle_and_converts_without_committing() {
+        let (actions, transition) = key_actions(
+            Composition::default(),
+            InputMode::Latin,
+            UserAction::Henkan,
+            shared::ConversionConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(actions, vec![ClientAction::SetIMEMode(InputMode::Kana)]);
+        assert_eq!(transition, CompositionState::None);
+        let composition = Composition {
+            state: CompositionState::Composing,
+            preview: "かんじ".into(),
+            ..Composition::default()
+        };
+        let (actions, transition) = key_actions(
+            composition,
+            InputMode::Kana,
+            UserAction::Henkan,
+            shared::ConversionConfig::default(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            actions,
+            vec![ClientAction::RequestCandidates { prediction: false }]
+        );
+        assert_eq!(transition, CompositionState::Previewing);
     }
 
     #[test]
