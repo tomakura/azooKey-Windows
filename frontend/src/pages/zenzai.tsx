@@ -54,7 +54,7 @@ export const Zenzai = () => {
         personalization: false,
         personalization_path: "",
         backend: "",
-        inference_limit: 1,
+        inference_limit: 2,
         model_path: "",
         prediction: false,
     });
@@ -81,7 +81,7 @@ export const Zenzai = () => {
                     personalization: zenzai.personalization ?? false,
                     personalization_path: zenzai.personalization_path ?? "",
                     backend: zenzai.backend,
-                    inference_limit: zenzai.inference_limit ?? 1,
+                    inference_limit: zenzai.inference_limit ?? 2,
                     model_path: zenzai.model_path ?? "",
                     prediction: zenzai.prediction ?? false,
                 });
@@ -316,7 +316,7 @@ export const Zenzai = () => {
                             推論回数
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            変換候補を評価し直す最大回数
+                            変換候補を評価し直す最大回数。2回を推奨（1回は速度優先）
                         </p>
                     </div>
                     <Input className="w-24" type="number" min={1} max={8} value={value.inference_limit} disabled={!value.enable} onChange={handleInferenceLimitChange} />

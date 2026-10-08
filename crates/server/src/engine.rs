@@ -54,6 +54,15 @@ fn c_string(text: &str) -> Result<CString, String> {
     CString::new(text).map_err(|_| "Text contains a NUL character".to_string())
 }
 
+fn prefer_literal_latin(reading: &str, raw_input: &str) -> bool {
+    raw_input.starts_with(|ch: char| ch.is_ascii_uppercase())
+        || (reading.ends_with(|ch: char| ch.is_ascii_alphabetic())
+            && reading
+                .trim_end_matches('n')
+                .chars()
+                .any(|ch| ch.is_ascii_alphabetic()))
+}
+
 unsafe fn take_text(pointer: *mut c_char) -> String {
     let text = CStr::from_ptr(pointer).to_string_lossy().into_owned();
     FreeText(pointer);
@@ -261,22 +270,6 @@ impl Engine {
         }
         if snapshot == Some(false) {
             suggestions.retain(|candidate| !candidate.is_prediction);
-            if !raw_input.is_empty()
-                && raw_input.chars().all(|ch| ch.is_ascii_alphabetic())
-                && !suggestions
-                    .iter()
-                    .any(|candidate| candidate.text == raw_input)
-            {
-                suggestions.insert(
-                    1.min(suggestions.len()),
-                    Suggestion {
-                        text: raw_input.to_string(),
-                        subtext: String::new(),
-                        corresponding_count: reading.chars().count() as i32,
-                        is_prediction: false,
-                    },
-                );
-            }
         }
         if self.config.zenzai.enable {
             let status = unsafe { take_text(GetZenzaiStatus()) };
@@ -289,6 +282,33 @@ impl Engine {
             .iter()
             .take_while(|candidate| self.registered_words.contains(&candidate.text))
             .count();
+        if snapshot == Some(false)
+            && !raw_input.is_empty()
+            && raw_input.chars().all(|ch| ch.is_ascii_alphabetic())
+        {
+            let existing = suggestions
+                .iter()
+                .position(|candidate| candidate.text == raw_input && candidate.subtext.is_empty());
+            let prefer_latin = prefer_literal_latin(&reading, raw_input);
+            if existing.is_none()
+                || (prefer_latin && existing.is_some_and(|index| index >= registered_count))
+            {
+                let candidate = existing
+                    .map(|index| suggestions.remove(index))
+                    .unwrap_or_else(|| Suggestion {
+                        text: raw_input.to_string(),
+                        subtext: String::new(),
+                        corresponding_count: reading.chars().count() as i32,
+                        is_prediction: false,
+                    });
+                let index = if prefer_latin {
+                    registered_count
+                } else {
+                    registered_count.max(1).min(suggestions.len())
+                };
+                suggestions.insert(index, candidate);
+            }
+        }
         let supplemental = if self.config.conversion.dynamic_candidates {
             azookey_converter::dynamic_candidates(&reading)
                 .into_iter()
@@ -365,6 +385,26 @@ impl Engine {
 mod tests {
     use super::*;
 
+    #[test]
+    fn latin_priority_does_not_replace_complete_romaji_readings() {
+        for (reading, raw) in [
+            ("うぃんどws", "windows"),
+            ("せrゔぇr", "server"),
+            ("pろじぇct", "project"),
+            ("Windows", "Windows"),
+        ] {
+            assert!(prefer_literal_latin(reading, raw));
+        }
+        for (reading, raw) in [
+            ("かんじ", "kanji"),
+            ("あい", "ai"),
+            ("にほn", "nihon"),
+            ("うぃんどwsをつかいます", "windowswotsukaimasu"),
+        ] {
+            assert!(!prefer_literal_latin(reading, raw));
+        }
+    }
+
     // A single test owns the Swift globals and a temporary APPDATA for its entire lifetime.
     #[test]
     fn official_engine_settings_dictionary_learning_and_ffi() {
@@ -422,13 +462,20 @@ mod tests {
             .suggestions
             .iter()
             .any(|candidate| candidate.text == "漢字"));
+        assert_ne!(normal.suggestions[0].text, "kanji");
         let english = engine
             .convert("うぃんどws".into(), "windows", "", false)
             .unwrap();
-        assert!(english
-            .suggestions
-            .iter()
-            .any(|candidate| candidate.text == "windows"));
+        assert_eq!(english.suggestions[0].text, "windows");
+        let mixed = engine
+            .convert(
+                "うぃんどwsをつかいます".into(),
+                "windowswotsukaimasu",
+                "",
+                false,
+            )
+            .unwrap();
+        assert_ne!(mixed.suggestions[0].text, "windowswotsukaimasu");
         engine.clear();
         engine.append("kanji").unwrap();
         assert!(engine.append("\0").is_err());
