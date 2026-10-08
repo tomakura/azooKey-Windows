@@ -45,9 +45,9 @@ $npmCli = "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js"
 Push-Location frontend
 try {
     if (Test-Path $npmCli) {
-        node $npmCli run tauri build
+        node $npmCli run tauri build -- --no-bundle
     } else {
-        npm run tauri build
+        npm run tauri build -- --no-bundle
     }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {

@@ -3,6 +3,10 @@ name: Rust
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 on:
   push:
   pull_request:
@@ -19,6 +23,15 @@ jobs:
 
     - name: Cache Rust
       uses: Swatinem/rust-cache@v2
+      with:
+        cache-on-failure: true
+
+    - name: Restore Swift build cache
+      id: swift-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: server-swift/.build
+        key: ${{ runner.os }}-swift-6.3.2-${{ hashFiles('server-swift/Package.swift', 'server-swift/Package.resolved', 'server-swift/patches/*.patch') }}
 
     - name: Install Swift
       uses: compnerd/gha-setup-swift@main
@@ -116,6 +129,13 @@ jobs:
           build/azookey-setup.exe
           build/azookey-setup.exe.sha256
         if-no-files-found: error
+
+    - name: Save Swift build cache
+      if: always() && !cancelled() && steps.swift-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: server-swift/.build
+        key: ${{ steps.swift-cache.outputs.cache-primary-key }}
 
   release-alpha10:
     needs: build
