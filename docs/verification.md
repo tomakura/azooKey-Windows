@@ -176,6 +176,28 @@ RTX 4070 Ti / CUDAでの比較:
 - 最終配布EXEとSwift DLLでも、推論2回でCUDA/Vulkanとも先頭44/44件の一致を確認した。CUDAは中央値28.80ms・95パーセンタイル38.52ms、Vulkanは33.12ms・39.21ms。両方の実行ログでモデル全13層がGPUへ配置されたことを確認した（`inference-quality-packaged-2-{cuda,vulkan}`）。
 - 並行予測を含む240キーの入力は中央値0.57ms・95パーセンタイル0.70ms・最大1.26ms。Windowsの各キーでの英字保持、Spaceの通常変換、Tabの予測だけの候補、入力応答に候補が混ざらないことを確認した（`inference-quality-input-final-cuda/results.json`）。初回実行は検証用登録語をプロファイルに用意せず、その確認で失敗した。計測スクリプトに必要な辞書フィクスチャの準備を追加し、再実行が通った。
 
+## alpha.8の文節操作・変換キー
+
+- 部分変換中の左右キーが`CommitCandidate`と`EndComposition`を実行し、全文を確定していた。左右を未確定の文節移動、Shift＋左右を1文字ずつの境界変更へ分離した。候補一覧内の読みの長さを探すだけだった旧範囲変更処理を置き換え、指定範囲の読みを実エンジンで再変換する。
+- 上流の`Candidate.makePrefixClauseCandidate`から文節ごとの表示文字列と読みの長さを取得し、FFI・protobufを通してWindowsクライアントへ渡す。テンプレートや辞書に由来しない候補は一つの不可分な文節として扱う。文字列や読みの合計が候補と一致することをクライアントで検証する。
+- 文節の選択・伸縮・候補変更は`ClauseSession`に保持する。Enterまで全文を同じTSF composition内に残し、選択文節だけの表示属性と候補ウィンドウの位置を更新する。境界変更では隣接文節も新しい読みで再変換する。未変換の残りを選択した場合は、その残りの文節分割も取得する。読み編集用の独立状態は変更せず、Backspaceや次の入力で元の入力を利用できる。
+- JISの`VK_CONVERT`・`VK_NONCONVERT`がキー判定に未登録だった。変換キーは入力中に通常変換、未入力時に日本語入力をオンにする。無変換は既定でカタカナ→半角カタカナ→ひらがなを循環し、設定画面で英数モードへの切り替えを選べる。旧設定に項目がない場合は既定動作になる。
+- キー判定を副作用のない関数へ切り出して、部分変換・全文変換・未変換それぞれで左右キーが確定処理を呼ばないことを回帰確認した。クライアント15件、共有設定2件、変換ライブラリ21件、設定画面4件のテストが通った。全体clippy、x64/x86チェック、設定画面のビルドが通った。最後の変換キーの未入力時動作についてもクライアントのテスト・clippy・x64/x86ビルドを実施した。
+- CPU/CUDA/Vulkanの実Swiftエンジンで辞書・学習・FFIの回帰テストが通った。実IPCでも各文節と伸縮した範囲の候補を取得し、その後に読み・元のローマ字が全文のまま保持されることを検証した。これはTSFへのネイティブ打鍵を自動化した検証ではない。
+- 44例の回帰セットは先頭44/44件の一致を維持した。ビルド終了後にalpha.7と修正版を同じ条件で連続比較したCUDA変換時間は、中央値29.82→29.58ms、95パーセンタイル38.73→37.82msだった。最初のビルド中計測では49.15msとなったが、負荷を揃えた比較で増加は再現しなかった。環境はRTX 4070 Ti、推論回数2、学習オフ、ライブ変換オフ。時間はConvertText RPCで、ネイティブアプリ描画を含まない。
+- 無変換設定の表示と「英数」→「かな切り替え」の保存要求をPlaywrightで検証し、JavaScriptエラーはなかった。Tauri invokeをテスト用に置き換えたブラウザー検証であり、実インストール済み設定を変更していない。スクリーンショットも確認した（`target/verification/muhenkan-settings.png`）。
+- 証跡: `safe-clauses.log`、`swift-clauses-build.log`、`clauses-engine-tests.log`、`clauses-engine-{cpu,vulkan}.log`、`inference-clauses-idle-{before,after}-cuda/results.json`、`inference-clauses-input_latency-cuda/results.json`（`target/verification`内）。
+- 更新インストールと、再サインイン後のメモ帳・32bitアプリでの文節選択表示、左右移動、Shift＋左右、変換・無変換キーの実入力確認は残る。検証時点のインストール済み版はalpha.7だった。
+
+## alpha.8の配布物
+
+- 版: `0.1.0-alpha.8`
+- 最終インストーラー: `build/azookey-setup.exe` (511074773 bytes)
+- SHA256: `885A4E32BFBF902A2D561E22A5732430F3FCCC9312578E100925DCFAFCCECF60`
+- 最後の変換キー修正を含むx64/x86 DLLを再ビルドし、配布ファイル3,471件のハッシュ・サイズ・アーキテクチャ・必要リソースを照合した。Inno Setupの最終生成は成功した（`target/verification/installer-alpha8-final.log`）。
+- 最終配布EXEとSwift DLLでも、並行予測を含む240キー入力、Space/Tabの候補分離、文節・伸縮範囲の変換後に全文の読みとローマ字が残ることを確認した。240キーの入力RPCは中央値0.57ms・95パーセンタイル0.71ms・最大1.15msだった。Vulkanでも44例の先頭一致44/44件を確認し、両方のGPUバックエンドの全13層配置をログで確認した（`inference-alpha8-packaged-input_latency-cuda`、`inference-alpha8-packaged-conversion_quality-vulkan`）。
+- この版のインストールは実行していない。インストール済みはalpha.7で、更新後の再サインインと実入力確認が残る。
+
 ## alpha.7の配布物
 
 - 版: `0.1.0-alpha.7`
