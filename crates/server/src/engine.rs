@@ -285,9 +285,15 @@ impl Engine {
                 return Err(format!("Zenzai: {status}"));
             }
         }
-        let mut supplemental = Vec::new();
+        let registered_count = suggestions
+            .iter()
+            .take_while(|candidate| self.registered_words.contains(&candidate.text))
+            .count();
         if self.config.conversion.dynamic_candidates {
-            supplemental.extend(
+            // Date/time helpers must not replace the best ordinary conversion.
+            let insertion = registered_count.max(1).min(suggestions.len());
+            suggestions.splice(
+                insertion..insertion,
                 azookey_converter::dynamic_candidates(&reading)
                     .into_iter()
                     .map(|candidate| Suggestion {
@@ -306,18 +312,16 @@ impl Engine {
                 &self.context,
                 &reading,
             )?;
-            supplemental.extend(extra.into_iter().map(|candidate| Suggestion {
-                text: candidate.text,
-                subtext: candidate.subtext,
-                corresponding_count: candidate.corresponding_count,
-                is_prediction: false,
-            }));
+            suggestions.splice(
+                registered_count..registered_count,
+                extra.into_iter().map(|candidate| Suggestion {
+                    text: candidate.text,
+                    subtext: candidate.subtext,
+                    corresponding_count: candidate.corresponding_count,
+                    is_prediction: false,
+                }),
+            );
         }
-        let registered_count = suggestions
-            .iter()
-            .take_while(|candidate| self.registered_words.contains(&candidate.text))
-            .count();
-        suggestions.splice(registered_count..registered_count, supplemental);
         suggestions.push(Suggestion {
             text: reading.clone(),
             subtext: String::new(),
@@ -378,6 +382,17 @@ mod tests {
             .map(PathBuf::from)
             .unwrap_or_else(|| root.join("server-swift/azooKey_dictionary_storage"));
         let mut engine = Engine::new(&resources).unwrap();
+        let today = engine.convert("きょう".into(), "kyou", "", false).unwrap();
+        assert_eq!(today.suggestions[0].text, "今日");
+        let dates = azookey_converter::dynamic_candidates("きょう");
+        assert!(today
+            .suggestions
+            .iter()
+            .skip(1)
+            .any(|candidate| { dates.iter().any(|date| date.text == candidate.text) }));
+        engine.clear();
+        assert_eq!(engine.append("kyou").unwrap().suggestions[0].text, "今日");
+        engine.clear();
         let result = engine.append("kanji").unwrap();
         assert_eq!(result.hiragana, "かんじ");
         assert!(result
@@ -530,6 +545,13 @@ mod tests {
         config.conversion.max_candidates = 2;
         config.write();
         engine.reload().unwrap();
+        let today = engine.convert("きょう".into(), "kyou", "", false).unwrap();
+        assert_eq!(today.suggestions.len(), 2);
+        assert_eq!(today.suggestions[0].text, "今日");
+        assert!(dates
+            .iter()
+            .any(|date| date.text == today.suggestions[1].text));
+        engine.clear();
         assert_eq!(engine.append("kanji").unwrap().suggestions.len(), 2);
 
         engine.clear();

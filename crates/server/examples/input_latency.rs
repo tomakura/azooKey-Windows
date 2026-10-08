@@ -108,7 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             assert_eq!(response.raw_input, prefix);
         }
         checks.push("Windows remains Latin at every keystroke");
-        for input in ["windows", "kanji", "kode"] {
+        for input in ["windows", "kanji", "kyou", "kode"] {
             client
                 .clear_text(ClearTextRequest { preview_only: true })
                 .await?;
@@ -140,6 +140,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let expected = match input {
                 "windows" => "windows",
                 "kanji" => "漢字",
+                "kyou" => "今日",
                 _ => "検証専用語",
             };
             assert!(
@@ -147,6 +148,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "Missing {expected}: {:?}",
                 result.suggestions
             );
+            if input == "kyou" {
+                assert_eq!(result.suggestions[0].text, "今日");
+            }
         }
         checks.push("Space returns normal candidates including typed English");
         checks.push("Tab returns predictions only");
