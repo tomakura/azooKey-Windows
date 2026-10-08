@@ -1,6 +1,6 @@
 # 配布版の検証記録
 
-対象: 0.1.0-alpha.3。READMEのチェックは実装済みを表し、Windowsへの登録後の受け入れ検証とは区別します。
+対象: 0.1.0-alpha.4。READMEのチェックは実装済みを表し、Windowsへの登録後の受け入れ検証とは区別します。
 
 ## 実行済み
 
@@ -68,7 +68,7 @@ Windows操作ヘルパーは未接続です。UIAccess付き候補UIのWebView2�
 - 文節確定後の追加入力でも、ライブ変換オフ時に本文へ予測が先に挿入されないよう修正。
 - VK_KANA・VK_IME_ON・VK_DBE_HIRAGANAは日本語入力をオンにし、同じキーを繰り返してもオフにしない。VK_IME_OFFで英数へ切り替え。
 - Windows言語バーの右クリックが入力モードを切り替えていた原因を修正し、設定画面を開く。浮動表示には歯車、スタートメニューには「Azookey 設定」を追加。
-- 初回更新では使用中の旧IME DLLが上書きを拒否したため、インストーラーを版ごとのDLL名へ変更。既存アプリが読み込んだ旧DLLを保持し、新しく開くアプリには更新版を登録する。使用中DLLのアンインストール時は削除を再起動後へ延期できるようにした。
+- 初回更新では使用中の旧IME DLLが上書きを拒否したため、インストーラーを版ごとのDLL名へ変更。既存アプリが読み込んだ旧DLLを保持し、更新版を登録する。使用中DLLのアンインストール時は削除を再起動後へ延期できるようにした。
 - 続いて旧IMEが読み込んだ`vcruntime140.dll`の置換で停止した。既存ファイルと配布ファイルのSHA256が一致することを確認し、VCランタイムを強制上書き対象から分離した。Inno Setupの`replacesameversion`で、同一バージョン・同一内容を保持し、同じバージョンでも内容が異なる場合は更新する（[公式仕様](https://jrsoftware.org/ishelp/topic_filessection.htm)）。
 - 設定画面の「全般」にエンジン再起動を追加。設定保存後にサーバーへ終了を依頼し、選択したバックエンドで新しいプロセスを起動する。既存IPC接続から異なるPIDの応答を得てから完了と表示する。
 - 実配布版の設定画面をPlaywrightで操作し、ライブ変換の初期値オフ・予測オン、ライブ変換のオン／オフ保存と再読み込みを確認。
@@ -83,10 +83,21 @@ Windows操作ヘルパーは未接続です。UIAccess付き候補UIのWebView2�
 - 既存設定の内容が保持され、ライブ変換オフ・予測オンを確認。
 - スタートメニューの「Azookey 設定」の配置とリンク先を確認。
 - launcher・候補UI・変換エンジンの起動を確認。入力を変更しない`query --status`でインストール済みエンジンのPID 5072から応答を得た。
-- 証跡: `upgrade-input-ux-result.json`、`upgrade-input-ux.log`、`installer-alpha3-artifact.json`。更新後の実キー操作はユーザー確認待ち。起動中だったアプリは保存して開き直すと新しいIME DLLを読み込む。
+- 証跡: `upgrade-input-ux-result.json`、`upgrade-input-ux.log`、`installer-alpha3-artifact.json`。この時点では、起動中アプリやExplorerが更新版DLLを読み込んだことまでは確認できていなかった。
+
+## alpha.4の右クリックと旧DLLの残留
+
+- alpha.3更新後も右クリックが入力モード切り替えになり、かなキーが効かないとの報告を受けた。
+- 実プロセスのモジュールを調べ、Notepad (PID 49028)、Explorer (15832)、Code、Discord、SearchHost、Vivaldiが旧`azookey.dll`を読み込んでいることを確認。ユーザーに有効なCOM登録はalpha.3を指し、HKCUの別登録も存在しなかった。登録先の更新と、実際に使われているDLLは一致していなかった。
+- 作業を保存してWindowsからサインアウト・再サインインする必要がある旨をインストーラー完了画面に追加。アプリの強制終了や自動サインアウトは行わない。
+- 新版の右クリックも設定画面を直接起動していたため、「設定を開く」を選べるネイティブメニューへ変更。キャンセル時は入力モードを変更しない。[OnClickの公式仕様](https://learn.microsoft.com/ja-jp/windows/win32/api/ctfutb/nf-ctfutb-itflangbaritembutton-onclick)のクリック種別と画面座標を利用する。
+- クライアントの既存テスト7件、clippy、フォーマット検査、x64/x86の配布用ビルド、設定画面のビルド、インストーラー静的検証を実施。
+- かなキーの追加変更はせず、alpha.3で追加済みの日本語入力オン処理を保持。サインインし直した後の実キー操作と右クリックメニュー表示は未確認。
+- alpha.4の実更新は終了コード0で完了。全3,471ファイルのSHA256、x64/x86のCOM登録、日本語IMEプロファイル、設定ショートカットを照合。既存設定を保持し、ライブ変換オフ・予測オンを確認した。
+- 証跡: `loaded-ime-before-alpha4.json`、`upgrade-alpha4-result.json`、`upgrade-alpha4.log`、`installer-alpha4-artifact.json`（`target/verification`内）。インストーラー上の再起動要求はなくても、旧IMEを読み込んだプロセスを切り替えるにはサインアウトが必要。
 
 ## 生成した配布物
 
-- インストーラー: `build/azookey-setup.exe` (510960939 bytes)
-- SHA256: `9B159FB438124CC108359FB9CD1C5E3628DE067262321BAA00C7FFD70F3446A2`
+- インストーラー: `build/azookey-setup.exe` (510944767 bytes)
+- SHA256: `B76D130CBB867002AF7FCE671A7F44BEB3ED6724F41882E1237BB01D98AFB385`
 - ハッシュ一覧: `build/release/manifest.json`、照合用: `build/azookey-setup.exe.sha256`

@@ -8,6 +8,8 @@
 # インストール方法
 [Release](https://github.com/fkunn1326/azooKey-Windows/releases)から`azookey-setup.exe`をダウンロードし、インストーラーを実行してください。
 
+更新後は、作業を保存してWindowsからサインアウトし、再度サインインしてください。起動中のアプリやタスクバーには旧IMEが残ることがあり、設定画面からのエンジン再起動だけではIME本体を更新できません。
+
 # 機能
 
 - [x] ライブ変換
@@ -25,7 +27,7 @@
 
 # 設定
 
-スタートメニューの「Azookey 設定」、入力モード表示の歯車ボタン、またはWindows言語バーの「あ／A」の右クリックで開けます。実行ファイルは `%APPDATA%\Azookey\azookey_settings.exe` です。
+スタートメニューの「Azookey 設定」、入力モード表示の歯車ボタン、またはWindows言語バーの「あ／A」を右クリックして「設定を開く」を選ぶと開けます。実行ファイルは `%APPDATA%\Azookey\azookey_settings.exe` です。
 
 ## Zenzai
 
