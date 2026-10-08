@@ -67,6 +67,7 @@ pub fn create_indicator_webview(window: &Window) -> Result<WebView> {
                         filter: drop-shadow(3px 3px 3px rgba(0, 0, 0, 0.1));
                     }
                     main {
+                        position: relative;
                         width: 100%;
                         height: 100%;
                         border: 1px solid #2CB5FF;
@@ -79,6 +80,20 @@ pub fn create_indicator_webview(window: &Window) -> Result<WebView> {
                         cursor: default;
                         user-select: none;
                     }
+                    #settings-button {
+                        position: absolute;
+                        right: 2px;
+                        bottom: 2px;
+                        width: 24px;
+                        height: 24px;
+                        border: 0;
+                        border-radius: 4px;
+                        background: transparent;
+                        color: inherit;
+                        cursor: pointer;
+                        font-size: 16px;
+                    }
+                    #settings-button:hover { background: rgba(128,128,128,0.2); }
                     #context-menu {
                         display: none;
                         position: fixed;
@@ -105,10 +120,25 @@ pub fn create_indicator_webview(window: &Window) -> Result<WebView> {
                     @media (prefers-color-scheme: dark) {
                         body { color: #FFFFFF; }
                         main {
+                        position: relative;
                             border: 1px solid #5C6BC0;
                             background-color: #1E1E1E;
                         }
-                        #context-menu {
+                        #settings-button {
+                        position: absolute;
+                        right: 2px;
+                        bottom: 2px;
+                        width: 24px;
+                        height: 24px;
+                        border: 0;
+                        border-radius: 4px;
+                        background: transparent;
+                        color: inherit;
+                        cursor: pointer;
+                        font-size: 16px;
+                    }
+                    #settings-button:hover { background: rgba(128,128,128,0.2); }
+                    #context-menu {
                             background: #2D2D2D;
                             border-color: #424242;
                         }
@@ -126,7 +156,7 @@ pub fn create_indicator_webview(window: &Window) -> Result<WebView> {
                         style.textContent = css;
                     }
                     function updateInputMethod(text) {
-                        document.querySelector('main').innerText = text;
+                        document.getElementById('input-mode').innerText = text;
                     }
 
                     document.addEventListener('DOMContentLoaded', () => {
@@ -161,7 +191,8 @@ pub fn create_indicator_webview(window: &Window) -> Result<WebView> {
             </head>
             <body style="margin: 0;">
                 <main>
-                    あ
+                    <span id="input-mode">あ</span>
+                    <button id="settings-button" title="設定を開く" aria-label="設定を開く" onclick="event.stopPropagation(); openSettings()">⚙</button>
                 </main>
                 <div id="context-menu">
                     <div class="menu-item" onclick="openSettings()">設定を開く</div>
@@ -204,16 +235,21 @@ pub fn create_indicator_webview(window: &Window) -> Result<WebView> {
                         let _ = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
                     },
                     Some("open_settings") => {
-                        let _ = std::process::Command::new(
-                            std::env::current_exe()
-                                .unwrap_or_default()
-                                .parent()
-                                .map(|p| p.join("azookey_settings.exe"))
-                                .unwrap_or_else(|| {
-                                    std::path::PathBuf::from("azookey_settings.exe")
-                                }),
-                        )
-                        .spawn();
+                        let result = (|| -> std::io::Result<()> {
+                            let exe = std::env::current_exe()?;
+                            let directory = exe.parent().ok_or_else(|| std::io::Error::other("UI directory is missing"))?;
+                            std::process::Command::new(directory.join("azookey_settings.exe")).spawn()?;
+                            Ok(())
+                        })();
+                        if let Err(error) = result {
+                            let message = windows::core::HSTRING::from(format!("設定画面を開けませんでした: {error}"));
+                            unsafe {
+                                windows::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                                    None, &message, windows::core::w!("Azookey"),
+                                    windows::Win32::UI::WindowsAndMessaging::MB_ICONERROR,
+                                );
+                            }
+                        }
                     }
                     Some("toggle_learning") => {
                         tokio::spawn(async {

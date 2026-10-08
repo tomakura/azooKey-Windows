@@ -7,7 +7,7 @@ use windows::{
             TextServices::{
                 ITfLangBarItemButton_Impl, ITfLangBarItemSink, ITfLangBarItem_Impl, ITfMenu,
                 ITfSource_Impl, TfLBIClick, GUID_LBI_INPUTMODE, TF_LANGBARITEMINFO,
-                TF_LBI_STYLE_BTN_BUTTON,
+                TF_LBI_CLK_RIGHT, TF_LBI_STYLE_BTN_BUTTON,
             },
             WindowsAndMessaging::{LoadImageW, HICON, IMAGE_ICON, LR_DEFAULTCOLOR},
         },
@@ -65,7 +65,18 @@ impl ITfLangBarItem_Impl for TextServiceFactory_Impl {
 
 impl ITfLangBarItemButton_Impl for TextServiceFactory_Impl {
     #[macros::anyhow]
-    fn OnClick(&self, _click: TfLBIClick, _pt: &POINT, _prcarea: *const RECT) -> Result<()> {
+    fn OnClick(&self, click: TfLBIClick, _pt: &POINT, _prcarea: *const RECT) -> Result<()> {
+        if click == TF_LBI_CLK_RIGHT {
+            let dll = std::path::PathBuf::from(DllModule::get_path()?);
+            let settings = dll
+                .parent()
+                .context("IME directory is missing")?
+                .join("azookey_settings.exe");
+            std::process::Command::new(settings)
+                .spawn()
+                .context("設定画面を開けませんでした")?;
+            return Ok(());
+        }
         let mode = {
             let ime_mode = &IMEState::get()?.input_mode;
             match ime_mode {

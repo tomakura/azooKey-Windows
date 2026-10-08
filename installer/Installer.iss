@@ -1,7 +1,7 @@
 #include "CodeDependencies.iss"
 
 #define MyAppName "Azookey"
-#define MyAppVersion "0.1.0-alpha.2"
+#define MyAppVersion "0.1.0-alpha.3"
 #define MyAppPublisher "fkunn1326"
 #define MyAppURL "https://github.com/fkunn1326/azooKey-Windows/"
 
@@ -38,6 +38,9 @@ Source: "../build/release/azookey_windows.dll"; DestDir: "{app}"; DestName: "azo
 Source: "../build/release/x86/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey32.dll"; Flags: ignoreversion regserver 32bit
 ; All other build artifacts (exes, dictionaries, etc.) — excludes the raw DLLs already handled above
 Source: "../build/release/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "azookey_windows.dll,x86\azookey_windows.dll"
+
+[Icons]
+Name: "{userprograms}\Azookey\Azookey 設定"; Filename: "{app}\azookey_settings.exe"
 
 [Run]
 ; Grant AppContainer (sandbox) read/execute on the IME DLLs — required for TSF to load the DLL
