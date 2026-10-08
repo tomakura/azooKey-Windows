@@ -9,6 +9,7 @@ use tonic::{transport::Server, Request, Response, Status};
 use tonic_reflection::server::Builder as ReflectionBuilder;
 
 static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
+static READING: Mutex<()> = Mutex::new(());
 static RESTART: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 fn restart_command() -> Result<std::process::Command, Box<dyn std::error::Error>> {
@@ -47,11 +48,41 @@ fn with_engine<T>(action: impl FnOnce(&mut Engine) -> Result<T, String>) -> Resu
     action(engine).map_err(Status::internal)
 }
 
+#[allow(clippy::result_large_err)]
+fn edit_reading(text: &str, operation: i32, count: i32) -> Result<ComposingText, Status> {
+    let _guard = READING
+        .lock()
+        .map_err(|_| Status::internal("Reading mutex poisoned"))?;
+    engine::edit_reading(text, operation, count).map_err(Status::internal)
+}
+
 #[derive(Debug, Default)]
 pub struct MyAzookeyService;
 
 #[tonic::async_trait]
 impl AzookeyService for MyAzookeyService {
+    async fn convert_text(
+        &self,
+        request: Request<ConvertTextRequest>,
+    ) -> Result<Response<AppendTextResponse>, Status> {
+        let request = request.into_inner();
+        let composing_text = tokio::task::spawn_blocking(move || {
+            with_engine(|engine| {
+                engine.convert(
+                    request.reading,
+                    &request.raw_input,
+                    &request.context,
+                    request.prediction_only,
+                )
+            })
+        })
+        .await
+        .map_err(|error| Status::internal(error.to_string()))??;
+        Ok(Response::new(AppendTextResponse {
+            composing_text: Some(composing_text),
+        }))
+    }
+
     async fn engine_status(
         &self,
         _: Request<EngineStatusRequest>,
@@ -76,8 +107,12 @@ impl AzookeyService for MyAzookeyService {
         &self,
         request: Request<AppendTextRequest>,
     ) -> Result<Response<AppendTextResponse>, Status> {
-        let text = request.into_inner().text_to_append;
-        let composing_text = with_engine(|engine| engine.append(&text))?;
+        let request = request.into_inner();
+        let composing_text = if request.preview_only {
+            edit_reading(&request.text_to_append, 0, 0)?
+        } else {
+            with_engine(|engine| engine.append(&request.text_to_append))?
+        };
         Ok(Response::new(AppendTextResponse {
             composing_text: Some(composing_text),
         }))
@@ -85,9 +120,13 @@ impl AzookeyService for MyAzookeyService {
 
     async fn remove_text(
         &self,
-        _: Request<RemoveTextRequest>,
+        request: Request<RemoveTextRequest>,
     ) -> Result<Response<RemoveTextResponse>, Status> {
-        let composing_text = with_engine(|engine| engine.remove())?;
+        let composing_text = if request.into_inner().preview_only {
+            edit_reading("", 1, 0)?
+        } else {
+            with_engine(|engine| engine.remove())?
+        };
         Ok(Response::new(RemoveTextResponse {
             composing_text: Some(composing_text),
         }))
@@ -106,12 +145,16 @@ impl AzookeyService for MyAzookeyService {
 
     async fn clear_text(
         &self,
-        _: Request<ClearTextRequest>,
+        request: Request<ClearTextRequest>,
     ) -> Result<Response<ClearTextResponse>, Status> {
-        with_engine(|engine| {
-            engine.clear();
-            Ok(())
-        })?;
+        if request.into_inner().preview_only {
+            edit_reading("", 3, 0)?;
+        } else {
+            with_engine(|engine| {
+                engine.clear();
+                Ok(())
+            })?;
+        }
         Ok(Response::new(ClearTextResponse {}))
     }
 
@@ -119,8 +162,15 @@ impl AzookeyService for MyAzookeyService {
         &self,
         request: Request<ShrinkTextRequest>,
     ) -> Result<Response<ShrinkTextResponse>, Status> {
-        let offset = request.into_inner().offset;
-        let composing_text = with_engine(|engine| engine.shrink(offset))?;
+        let request = request.into_inner();
+        if request.offset < 0 {
+            return Err(Status::invalid_argument("Shrink count cannot be negative"));
+        }
+        let composing_text = if request.preview_only {
+            edit_reading("", 2, request.offset)?
+        } else {
+            with_engine(|engine| engine.shrink(request.offset))?
+        };
         Ok(Response::new(ShrinkTextResponse {
             composing_text: Some(composing_text),
         }))
@@ -139,6 +189,9 @@ impl AzookeyService for MyAzookeyService {
         &self,
         _: Request<UpdateConfigRequest>,
     ) -> Result<Response<UpdateConfigResponse>, Status> {
+        let _reading = READING
+            .lock()
+            .map_err(|_| Status::internal("Reading mutex poisoned"))?;
         with_engine(|engine| engine.reload())?;
         Ok(Response::new(UpdateConfigResponse {}))
     }

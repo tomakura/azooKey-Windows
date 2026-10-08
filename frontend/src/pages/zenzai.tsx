@@ -249,7 +249,7 @@ export const Zenzai = () => {
                             Zenzai予測
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            通常の予測候補がない場合に、Zenzaiで続きを予測します
+                            ライブ変換オン時に、Zenzaiで続きを予測します。ライブ変換オフ時の入力中予測は辞書から生成します
                         </p>
                     </div>
                     <Switch checked={value.prediction} disabled={!value.enable} onCheckedChange={handleZenzaiPredictionChange} />

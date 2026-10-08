@@ -19,4 +19,31 @@ import Testing
     #expect(getOptions().requireJapanesePrediction == .manualMix)
     #expect(options.typoCorrectionMode == .disabled)
     #expect(options.specialCandidateProviders.isEmpty)
+    config["enable"] = true
+    if case .off = getOptions(predictionOnly: true).zenzaiMode {} else {
+        Issue.record("Typing predictions must not run Zenzai")
+    }
+    config["enable"] = false
+
+    // The reading path must remain usable without creating or invoking a converter.
+    func edit(_ text: String, _ operation: Int32 = 0, _ count: Int32 = 0) -> String {
+        text.withCString { input in
+            let pointer = edit_reading(input: input, operation: operation, count: count)
+            defer { free_text(pointer) }
+            return String(cString: pointer)
+        }
+    }
+    #expect(edit("", 3) == "")
+    for (input, expected) in zip(["W", "i", "n", "d", "o", "w", "s"], ["W", "Wi", "Win", "Wind", "Windo", "Window", "Windows"]) {
+        #expect(edit(input) == expected)
+    }
+    #expect(edit("", 1) == "Window")
+    #expect(edit("s") == "Windows")
+    #expect(edit("", 3) == "")
+    #expect(edit("kanji") == "かんじ")
+    let original = get_reading_input()
+    #expect(String(cString: original) == "kanji")
+    free_text(original)
+    #expect(edit("", 2, 2) == "じ")
+    #expect(edit("", 3) == "")
 }

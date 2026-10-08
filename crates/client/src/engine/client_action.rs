@@ -14,6 +14,7 @@ pub enum ClientAction {
 
     MoveCursor(i32),
     ResizeConversion(i32),
+    RequestCandidates { prediction: bool },
     SetSelection(SetSelectionType),
 
     SetIMEMode(InputMode),

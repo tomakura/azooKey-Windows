@@ -270,11 +270,11 @@ impl TextServiceFactory {
                     ),
                     Navigation::Up => (
                         CompositionState::Previewing,
-                        vec![ClientAction::SetSelection(SetSelectionType::Up)],
+                        vec![ClientAction::RequestCandidates { prediction: true }],
                     ),
                     Navigation::Down => (
                         CompositionState::Previewing,
-                        vec![ClientAction::SetSelection(SetSelectionType::Down)],
+                        vec![ClientAction::RequestCandidates { prediction: true }],
                     ),
                 },
                 UserAction::ShiftedNavigation(direction) => match direction {
@@ -297,18 +297,9 @@ impl TextServiceFactory {
                 ),
                 UserAction::Space | UserAction::Tab => {
                     let prediction = matches!(action, UserAction::Tab);
-                    let first = prediction || !conversion_config.live_conversion;
-                    let Some(index) = candidate_for_key(
-                        &composition.candidates,
-                        composition.selection_index,
-                        prediction,
-                        first,
-                    ) else {
-                        return Ok(Some((vec![], composition.state)));
-                    };
                     (
                         CompositionState::Previewing,
-                        vec![ClientAction::SetSelection(SetSelectionType::Number(index))],
+                        vec![ClientAction::RequestCandidates { prediction }],
                     )
                 }
                 UserAction::Function(key) => match key {
@@ -428,7 +419,10 @@ impl TextServiceFactory {
                         prediction,
                         false,
                     ) else {
-                        return Ok(Some((vec![], composition.state)));
+                        return Ok(Some((
+                            vec![ClientAction::RequestCandidates { prediction }],
+                            CompositionState::Previewing,
+                        )));
                     };
                     (
                         CompositionState::Previewing,
@@ -557,26 +551,28 @@ impl TextServiceFactory {
 
                     candidates = ipc_service.append_text(text.clone())?;
                     selection_index = candidate_for_key(&candidates, 0, false, true).unwrap_or(0);
-                    let text = candidates.texts[selection_index as usize].clone();
-                    let sub_text = candidates.sub_texts[selection_index as usize].clone();
                     let hiragana = candidates.hiragana.clone();
-
-                    corresponding_count = candidates.corresponding_count[selection_index as usize];
-
-                    let (text, sub_text) = if !app_config.conversion.live_conversion {
-                        corresponding_count = hiragana.chars().count() as i32;
-                        (hiragana.clone(), String::new())
-                    } else {
-                        (text, sub_text)
-                    };
+                    let (text, sub_text) =
+                        if !app_config.conversion.live_conversion || candidates.is_latin_input() {
+                            corresponding_count = hiragana.chars().count() as i32;
+                            (hiragana.clone(), String::new())
+                        } else {
+                            corresponding_count =
+                                candidates.corresponding_count[selection_index as usize];
+                            (
+                                candidates.texts[selection_index as usize].clone(),
+                                candidates.sub_texts[selection_index as usize].clone(),
+                            )
+                        };
+                    raw_input = candidates.raw_input.clone();
 
                     preview = text.clone();
                     suffix = sub_text.clone();
                     raw_hiragana = hiragana.clone();
 
                     self.set_text(&text, &sub_text)?;
-                    ipc_service.set_candidates(&candidates)?;
-                    ipc_service.set_selection(selection_index)?;
+                    ipc_service.schedule_prediction(hiragana)?;
+                    ipc_service.set_selection(-1)?;
                 }
                 ClientAction::RemoveText => {
                     candidates = ipc_service.remove_text()?;
@@ -599,24 +595,22 @@ impl TextServiceFactory {
                         .cloned()
                         .unwrap_or(0);
 
-                    let (text, sub_text) = if !app_config.conversion.live_conversion {
-                        corresponding_count = hiragana.chars().count() as i32;
-                        (hiragana.clone(), String::new())
-                    } else {
-                        (text, sub_text)
-                    };
+                    let (text, sub_text) =
+                        if !app_config.conversion.live_conversion || candidates.is_latin_input() {
+                            corresponding_count = hiragana.chars().count() as i32;
+                            (hiragana.clone(), String::new())
+                        } else {
+                            (text, sub_text)
+                        };
 
-                    raw_input = raw_input
-                        .chars()
-                        .take(corresponding_count as usize)
-                        .collect();
+                    raw_input = candidates.raw_input.clone();
                     preview = text.clone();
                     suffix = sub_text.clone();
                     raw_hiragana = hiragana.clone();
 
                     self.set_text(&text, &sub_text)?;
-                    ipc_service.set_candidates(&candidates)?;
-                    ipc_service.set_selection(selection_index)?;
+                    ipc_service.schedule_prediction(hiragana)?;
+                    ipc_service.set_selection(-1)?;
                 }
                 ClientAction::MoveCursor(_offset) => {
                     // TODO: I'll use azookey-kkc's composingText
@@ -685,13 +679,21 @@ impl TextServiceFactory {
                     raw_hiragana.clear();
                     ipc_service.clear_text()?;
                 }
+                ClientAction::RequestCandidates { prediction } => {
+                    candidates = ipc_service.convert_text(raw_hiragana.clone(), *prediction)?;
+                    ipc_service.set_candidates(&candidates)?;
+                    if candidates.texts.is_empty() {
+                        transition = composition.state.clone();
+                        continue;
+                    }
+                    selection_index = 0;
+                    corresponding_count = candidates.corresponding_count[0];
+                    preview = candidates.texts[0].clone();
+                    suffix = candidates.sub_texts[0].clone();
+                    self.set_text(&preview, &suffix)?;
+                    ipc_service.set_selection(0)?;
+                }
                 ClientAction::SetSelection(selection) => {
-                    let candidates = {
-                        let text_service = self.borrow()?;
-                        let composition = text_service.borrow_composition()?.clone();
-                        composition.candidates.clone()
-                    };
-
                     let texts = candidates.texts.clone();
                     let sub_texts = candidates.sub_texts.clone();
 
@@ -722,12 +724,6 @@ impl TextServiceFactory {
                 ClientAction::ShrinkText(text) => {
                     // shrink text
                     let text = normalize_keyboard_layout_input(text, &keyboard_layout);
-                    raw_input.push_str(&text);
-                    raw_input = raw_input
-                        .chars()
-                        .skip(corresponding_count as usize)
-                        .collect();
-
                     ipc_service.shrink_text(corresponding_count)?;
                     let text = match mode {
                         InputMode::Kana => normalize_kana_input(&text, &symbol_input_style),
@@ -735,26 +731,28 @@ impl TextServiceFactory {
                     };
                     candidates = ipc_service.append_text(text)?;
                     selection_index = candidate_for_key(&candidates, 0, false, true).unwrap_or(0);
-
-                    let text = candidates.texts[selection_index as usize].clone();
-                    let sub_text = candidates.sub_texts[selection_index as usize].clone();
                     let hiragana = candidates.hiragana.clone();
-
-                    corresponding_count = candidates.corresponding_count[selection_index as usize];
-                    let (text, sub_text) = if !app_config.conversion.live_conversion {
-                        corresponding_count = hiragana.chars().count() as i32;
-                        (hiragana.clone(), String::new())
-                    } else {
-                        (text, sub_text)
-                    };
+                    let (text, sub_text) =
+                        if !app_config.conversion.live_conversion || candidates.is_latin_input() {
+                            corresponding_count = hiragana.chars().count() as i32;
+                            (hiragana.clone(), String::new())
+                        } else {
+                            corresponding_count =
+                                candidates.corresponding_count[selection_index as usize];
+                            (
+                                candidates.texts[selection_index as usize].clone(),
+                                candidates.sub_texts[selection_index as usize].clone(),
+                            )
+                        };
+                    raw_input = candidates.raw_input.clone();
                     self.shift_start(&preview, &text)?;
                     self.set_text(&text, &sub_text)?;
                     preview = text.clone();
                     suffix = sub_text.clone();
                     raw_hiragana = hiragana.clone();
 
-                    ipc_service.set_candidates(&candidates)?;
-                    ipc_service.set_selection(selection_index)?;
+                    ipc_service.schedule_prediction(hiragana)?;
+                    ipc_service.set_selection(-1)?;
                     self.update_pos()?;
 
                     transition = CompositionState::Composing;
@@ -769,6 +767,9 @@ impl TextServiceFactory {
                     };
 
                     self.set_text(&text, "")?;
+                    preview = text;
+                    suffix.clear();
+                    corresponding_count = raw_hiragana.chars().count() as i32;
                 }
             }
         }
@@ -865,6 +866,22 @@ mod tests {
         assert_eq!(candidate_number_to_index(1), 0);
         assert_eq!(candidate_number_to_index(9), 8);
         assert_eq!(candidate_number_to_index(0), 9);
+    }
+
+    #[test]
+    fn capitalized_english_remains_literal_during_live_conversion() {
+        for (raw, literal) in [
+            ("Windows", true),
+            ("windows", false),
+            ("kanji", false),
+            ("Windowsかな", false),
+        ] {
+            let candidates = Candidates {
+                raw_input: raw.into(),
+                ..Candidates::default()
+            };
+            assert_eq!(candidates.is_latin_input(), literal);
+        }
     }
 
     #[test]

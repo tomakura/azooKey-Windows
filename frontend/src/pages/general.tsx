@@ -257,7 +257,7 @@ export const General = () => {
                             予測変換
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            入力途中の予測を候補一覧に表示します。Tabで選択、Enterで確定します
+                            入力を待たせずに予測候補だけを表示します。Tabで選択、Enterで確定します
                         </p>
                     </div>
                     <Switch checked={value.prediction} onCheckedChange={handlePredictionChange} />
@@ -433,7 +433,7 @@ export const General = () => {
                     <RefreshCcw />
                     <div className="flex-1 space-y-1">
                         <p className="text-sm font-medium leading-none">
-                            v0.1.0-alpha.4
+                            v0.1.0-alpha.5
                         </p>
                     </div>
                     <Button  variant="secondary">

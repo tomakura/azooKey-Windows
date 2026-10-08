@@ -26,6 +26,14 @@ unsafe extern "C" {
     fn ShrinkText(offset: c_int) -> *mut c_char;
     fn ClearText();
     fn GetComposedText(length: *mut c_int) -> *mut *mut FFICandidate;
+    fn EditReading(input: *const c_char, operation: c_int, count: c_int) -> *mut c_char;
+    fn GetReadingInput() -> *mut c_char;
+    fn GetSnapshotCandidates(
+        input: *const c_char,
+        raw_input: *const c_char,
+        prediction_only: bool,
+        length: *mut c_int,
+    ) -> *mut *mut FFICandidate;
     fn LoadConfig() -> *mut c_char;
     fn ResetLearning();
     fn CommitCandidate(reading: *const c_char, text: *const c_char);
@@ -50,6 +58,16 @@ unsafe fn take_text(pointer: *mut c_char) -> String {
     let text = CStr::from_ptr(pointer).to_string_lossy().into_owned();
     FreeText(pointer);
     text
+}
+
+// Independent from Engine's inference lock. Configuration reload holds this lock too.
+pub fn edit_reading(text: &str, operation: i32, count: i32) -> Result<ComposingText, String> {
+    let text = c_string(text)?;
+    Ok(ComposingText {
+        hiragana: unsafe { take_text(EditReading(text.as_ptr(), operation, count)) },
+        suggestions: vec![],
+        raw_input: unsafe { take_text(GetReadingInput()) },
+    })
 }
 
 impl Engine {
@@ -174,16 +192,50 @@ impl Engine {
     }
 
     fn candidates(&mut self, reading: String) -> Result<ComposingText, String> {
+        self.collect_candidates(reading, None, "")
+    }
+
+    pub fn convert(
+        &mut self,
+        reading: String,
+        raw_input: &str,
+        context: &str,
+        prediction: bool,
+    ) -> Result<ComposingText, String> {
+        self.set_context(context)?;
+        if prediction && !self.config.conversion.prediction {
+            return Ok(ComposingText {
+                hiragana: reading,
+                suggestions: vec![],
+                raw_input: raw_input.to_string(),
+            });
+        }
+        self.collect_candidates(reading, Some(prediction), raw_input)
+    }
+
+    fn collect_candidates(
+        &mut self,
+        reading: String,
+        snapshot: Option<bool>,
+        raw_input: &str,
+    ) -> Result<ComposingText, String> {
         if reading.is_empty() {
             return Ok(ComposingText {
                 hiragana: reading,
                 suggestions: vec![],
+                raw_input: raw_input.to_string(),
             });
         }
         let mut count = 0;
         let mut suggestions = Vec::new();
         unsafe {
-            let pointer = GetComposedText(&mut count);
+            let pointer = if let Some(prediction) = snapshot {
+                let input = c_string(&reading)?;
+                let raw = c_string(raw_input)?;
+                GetSnapshotCandidates(input.as_ptr(), raw.as_ptr(), prediction, &mut count)
+            } else {
+                GetComposedText(&mut count)
+            };
             for index in 0..count as usize {
                 let candidate = &**pointer.add(index);
                 suggestions.push(Suggestion {
@@ -198,6 +250,33 @@ impl Engine {
                 });
             }
             FreeCandidates(pointer, count);
+        }
+        if snapshot == Some(true) {
+            suggestions.retain(|candidate| candidate.is_prediction);
+            return Ok(ComposingText {
+                hiragana: reading,
+                suggestions,
+                raw_input: raw_input.to_string(),
+            });
+        }
+        if snapshot == Some(false) {
+            suggestions.retain(|candidate| !candidate.is_prediction);
+            if !raw_input.is_empty()
+                && raw_input.chars().all(|ch| ch.is_ascii_alphabetic())
+                && !suggestions
+                    .iter()
+                    .any(|candidate| candidate.text == raw_input)
+            {
+                suggestions.insert(
+                    1.min(suggestions.len()),
+                    Suggestion {
+                        text: raw_input.to_string(),
+                        subtext: String::new(),
+                        corresponding_count: reading.chars().count() as i32,
+                        is_prediction: false,
+                    },
+                );
+            }
         }
         if self.config.zenzai.enable {
             let status = unsafe { take_text(GetZenzaiStatus()) };
@@ -270,6 +349,7 @@ impl Engine {
         Ok(ComposingText {
             hiragana: reading,
             suggestions,
+            raw_input: raw_input.to_string(),
         })
     }
 }
@@ -308,6 +388,31 @@ mod tests {
             .suggestions
             .iter()
             .all(|candidate| candidate.corresponding_count <= 3));
+        edit_reading("", 3, 0).unwrap();
+        let preview = edit_reading("kanji", 0, 0).unwrap();
+        assert_eq!(preview.hiragana, "かんじ");
+        assert_eq!(preview.raw_input, "kanji");
+        assert!(preview.suggestions.is_empty());
+        let normal = engine
+            .convert(preview.hiragana, &preview.raw_input, "", false)
+            .unwrap();
+        assert!(normal
+            .suggestions
+            .iter()
+            .all(|candidate| !candidate.is_prediction));
+        assert!(normal
+            .suggestions
+            .iter()
+            .any(|candidate| candidate.text == "漢字"));
+        let english = engine
+            .convert("うぃんどws".into(), "windows", "", false)
+            .unwrap();
+        assert!(english
+            .suggestions
+            .iter()
+            .any(|candidate| candidate.text == "windows"));
+        engine.clear();
+        engine.append("kanji").unwrap();
         assert!(engine.append("\0").is_err());
         assert!(engine.shrink(-1).is_err());
         engine.clear();
@@ -338,6 +443,15 @@ mod tests {
             .iter()
             .any(|candidate| !candidate.is_prediction));
         assert!(!result.suggestions[0].is_prediction);
+        let predictions = engine.convert("こで".into(), "kode", "", true).unwrap();
+        assert!(predictions
+            .suggestions
+            .iter()
+            .all(|candidate| candidate.is_prediction));
+        assert!(predictions
+            .suggestions
+            .iter()
+            .any(|candidate| candidate.text == "検証専用語"));
         engine.clear();
         config.conversion.prediction = false;
         config.write();

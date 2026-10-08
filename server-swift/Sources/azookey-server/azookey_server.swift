@@ -5,6 +5,8 @@ import ffi
 // The Rust server serializes all FFI calls; these functions run on its worker threads.
 nonisolated(unsafe) var converter: KanaKanjiConverter?
 nonisolated(unsafe) var composingText = ComposingText()
+// Reading edits use their own lock in Rust and never touch the converter or its inference state.
+nonisolated(unsafe) var readingText = ComposingText()
 nonisolated(unsafe) var lastCandidates: [Candidate] = []
 nonisolated(unsafe) var inputStyle: InputStyle = .roman2kana
 nonisolated(unsafe) var userEntries: [DicdataElement] = []
@@ -86,14 +88,14 @@ func zenzaiMode(context: String) -> ConvertRequestOptions.ZenzaiMode {
     )
 }
 
-func getOptions(context: String = "") -> ConvertRequestOptions {
+func getOptions(context: String = "", predictionOnly: Bool = false) -> ConvertRequestOptions {
     let emojiURL = emojiDictionaryURL()
     return ConvertRequestOptions(
         N_best: max(1, min(32, (config["max_candidates"] as? Int) ?? 16)),
         requireJapanesePrediction: ((config["prediction"] as? Bool) ?? true) ? .manualMix : .disabled,
         requireEnglishPrediction: .disabled,
         keyboardLanguage: .ja_JP,
-        englishCandidateInRoman2KanaInput: false,
+        englishCandidateInRoman2KanaInput: true,
         fullWidthRomanCandidate: true,
         learningType: ((config["learning"] as? Bool) ?? true) ? .inputAndOutput : .nothing,
         memoryDirectoryURL: memoryDirectoryURL(),
@@ -101,9 +103,9 @@ func getOptions(context: String = "") -> ConvertRequestOptions {
         textReplacer: .init(emojiDataProvider: { emojiURL }),
         specialCandidateProviders: ((config["dynamic_candidates"] as? Bool) ?? true)
             ? KanaKanjiConverter.defaultSpecialCandidateProviders : [],
-        zenzaiMode: zenzaiMode(context: context),
+        zenzaiMode: predictionOnly && !((config["live_conversion"] as? Bool) ?? false) ? .off : zenzaiMode(context: context),
         preloadDictionary: true,
-        experimentalZenzaiPredictiveInput: ((config["zenzai_prediction"] as? Bool) ?? false)
+        experimentalZenzaiPredictiveInput: (!predictionOnly || ((config["live_conversion"] as? Bool) ?? false)) && ((config["zenzai_prediction"] as? Bool) ?? false)
             && ((config["prediction"] as? Bool) ?? true),
         typoCorrectionMode: ((config["typo_correction"] as? Bool) ?? true) ? .enabled : .disabled,
         metadata: .init(versionString: "Azookey for Windows")
@@ -145,7 +147,7 @@ public func load_config() -> UnsafeMutablePointer<CChar> {
         next["inferenceLimit"] = (zenzai["inference_limit"] as? Int) ?? 2
         next["zenzai_prediction"] = (zenzai["prediction"] as? Bool) ?? false
         next["learning"] = ((json["learning"] as? [String: Any])?["enable"] as? Bool) ?? true
-        for key in ["prediction", "typo_correction", "dynamic_candidates", "max_candidates"] {
+        for key in ["prediction", "typo_correction", "dynamic_candidates", "max_candidates", "live_conversion"] {
             next[key] = conversion[key]
         }
         next["personalizationText"] = ""
@@ -174,6 +176,8 @@ public func load_config() -> UnsafeMutablePointer<CChar> {
             ? try parseUserDictionary(String(contentsOf: dictionaryURL, encoding: .utf8)) : []
         config = next
         inputStyle = nextStyle
+        composingText = ComposingText()
+        converter?.stopComposition()
         userEntries = entries
         converter?.importDynamicUserDictionary(entries)
         return _strdup("")!
@@ -246,6 +250,31 @@ public func append_text(
 
     cursorPtr.pointee = Int32(composingText.convertTargetCursorPosition)
     return _strdup(composingText.convertTarget)!
+}
+
+@_silgen_name("EditReading")
+public func edit_reading(input: UnsafePointer<CChar>, operation: Int32, count: Int32) -> UnsafeMutablePointer<CChar> {
+    switch operation {
+    case 0:
+        let text = String(cString: input)
+        let first = readingText.convertTarget.first ?? text.first
+        let latin = first.map { $0.isASCII && $0.isUppercase } ?? false
+        readingText.insertAtCursorPosition(text, inputStyle: latin ? .direct : inputStyle)
+    case 1: readingText.deleteBackwardFromCursorPosition(count: 1)
+    case 2: readingText.prefixComplete(composingCount: .surfaceCount(Int(count)))
+    case 3: readingText = ComposingText()
+    default: preconditionFailure("Unknown reading operation")
+    }
+    return _strdup(readingText.convertTarget)!
+}
+
+@_silgen_name("GetReadingInput")
+public func get_reading_input() -> UnsafeMutablePointer<CChar> {
+    let text = readingText.input.compactMap { element -> Character? in
+        if case .character(let character) = element.piece { return character }
+        return nil
+    }
+    return _strdup(String(text))!
 }
 
 @_silgen_name("RemoveText")
@@ -331,9 +360,38 @@ func to_list_pointer(_ list: [FFICandidate]) -> UnsafeMutablePointer<UnsafeMutab
 
 @_silgen_name("GetComposedText")
 public func get_composed_text(lengthPtr: UnsafeMutablePointer<Int32>) -> UnsafeMutablePointer<UnsafeMutablePointer<FFICandidate>?> {
+    collect_candidates(lengthPtr: lengthPtr, predictionOnly: false)
+}
+
+@_silgen_name("GetSnapshotCandidates")
+public func get_snapshot_candidates(input: UnsafePointer<CChar>, rawInput: UnsafePointer<CChar>, predictionOnly: Bool, lengthPtr: UnsafeMutablePointer<Int32>) -> UnsafeMutablePointer<UnsafeMutablePointer<FFICandidate>?> {
+    let raw = String(cString: rawInput)
+    let first = raw.first
+    let latin = first.map { $0.isASCII && $0.isUppercase } ?? false
+    let next = raw.isEmpty ? String(cString: input) : raw
+    let previous = String(composingText.input.compactMap { element -> Character? in
+        if case .character(let character) = element.piece { return character }
+        return nil
+    })
+    if next.hasPrefix(previous) {
+        composingText.insertAtCursorPosition(String(next.dropFirst(previous.count)),
+            inputStyle: raw.isEmpty || latin ? .direct : inputStyle)
+    } else {
+        converter?.stopComposition()
+        composingText = ComposingText()
+        composingText.insertAtCursorPosition(next, inputStyle: raw.isEmpty || latin ? .direct : inputStyle)
+    }
+    return collect_candidates(lengthPtr: lengthPtr, predictionOnly: predictionOnly, normalOnly: !predictionOnly)
+}
+
+func collect_candidates(lengthPtr: UnsafeMutablePointer<Int32>, predictionOnly: Bool, normalOnly: Bool = false) -> UnsafeMutablePointer<UnsafeMutablePointer<FFICandidate>?> {
     let hiragana = composingText.convertTarget
     let contextString = (config["context"] as? String) ?? ""
-    let options = getOptions(context: contextString)
+    var options = getOptions(context: contextString, predictionOnly: predictionOnly)
+    if normalOnly {
+        options.requireJapanesePrediction = .disabled
+        options.experimentalZenzaiPredictiveInput = false
+    }
     guard let converter else {
         lengthPtr.pointee = 0
         return to_list_pointer([])
@@ -349,9 +407,10 @@ public func get_composed_text(lengthPtr: UnsafeMutablePointer<Int32>) -> UnsafeM
     }
     // Keep predictions separate from conversions so live preview never completes untyped text.
     let limit = max(1, min(100, (config["max_candidates"] as? Int) ?? 16))
-    let predictions = Array(converted.predictionResults.prefix(max(0, limit - 1)))
-    let candidates = (registered + converted.mainResults).prefix(limit - predictions.count).map { ($0, false) }
-        + predictions.map { ($0, true) }
+    let predictions = Array(converted.predictionResults.prefix(predictionOnly ? limit : max(0, limit - 1)))
+    let candidates = predictionOnly ? predictions.map { ($0, true) }
+        : (registered + converted.mainResults).prefix(limit - predictions.count).map { ($0, false) }
+            + predictions.map { ($0, true) }
     var result: [FFICandidate] = []
     var seen: Set<String> = []
 

@@ -34,10 +34,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", response.into_inner().process_id);
         return Ok(());
     }
-    client.clear_text(ClearTextRequest {}).await?;
+    client
+        .clear_text(ClearTextRequest {
+            preview_only: false,
+        })
+        .await?;
     let response = client
         .append_text(AppendTextRequest {
             text_to_append: text,
+            preview_only: false,
         })
         .await?
         .into_inner();
@@ -50,6 +55,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "candidates": composed.suggestions.into_iter().map(|item| item.text).collect::<Vec<_>>()
         })
     );
-    client.clear_text(ClearTextRequest {}).await?;
+    client
+        .clear_text(ClearTextRequest {
+            preview_only: false,
+        })
+        .await?;
     Ok(())
 }

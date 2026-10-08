@@ -27,6 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client
         .set_candidate(SetCandidateRequest {
             candidates: vec![],
+            request_id: "probe".into(),
+            activate: true,
             candidate_items: vec![
                 CandidateItem {
                     text: "検証候補".into(),
