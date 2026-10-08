@@ -105,7 +105,7 @@ impl TextServiceFactory {
         }
     }
 
-    pub fn update_context(&self, preview: &str) -> Result<()> {
+    pub fn update_context(&self, preview: &str, suffix: &str) -> Result<()> {
         let result: Result<()> = (|| unsafe {
             let text_service = self.borrow()?;
 
@@ -116,7 +116,9 @@ impl TextServiceFactory {
                 text_service.tid,
                 parent_context.clone(),
                 Rc::new({
-                    let preview_count = preview.chars().count() as i32;
+                    let composition_count =
+                        preview.encode_utf16().count() + suffix.encode_utf16().count();
+                    let composition_count = i32::try_from(composition_count)?;
 
                     move |cookie| {
                         // 2. Get the selection from the parent context.
@@ -150,14 +152,17 @@ impl TextServiceFactory {
                         preceding_range.Collapse(cookie, TF_ANCHOR_START)?;
                         preceding_range.ShiftStart(
                             cookie,
-                            -30,
+                            -composition_count,
                             &mut preceding_range_shifted,
                             &halt_cond,
                         )?;
 
-                        preceding_range.ShiftEnd(
+                        // Anchor the context window before the entire composition, even
+                        // when the current input is longer than the context window.
+                        preceding_range.Collapse(cookie, TF_ANCHOR_START)?;
+                        preceding_range.ShiftStart(
                             cookie,
-                            -preview_count,
+                            -64,
                             &mut preceding_range_shifted,
                             &halt_cond,
                         )?;
@@ -171,7 +176,7 @@ impl TextServiceFactory {
                             &mut pcch,
                         )?;
 
-                        Ok(String::from_utf16_lossy(&pchtext[..pcch as usize]))
+                        preceding_text(&pchtext[..pcch as usize])
                     }
                 }),
             )?;
@@ -194,5 +199,35 @@ impl TextServiceFactory {
         }
 
         Ok(())
+    }
+}
+
+fn preceding_text(units: &[u16]) -> Result<String> {
+    // A bounded UTF-16 range may start in the middle of a surrogate pair.
+    let units = if units
+        .first()
+        .is_some_and(|unit| (0xDC00..=0xDFFF).contains(unit))
+    {
+        &units[1..]
+    } else {
+        units
+    };
+    Ok(String::from_utf16(units)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::preceding_text;
+
+    #[test]
+    fn bounded_context_keeps_complete_unicode_characters() {
+        let text = "😀この仕様を確認した。𠮷田さんからの依頼です。";
+        let units: Vec<_> = text.encode_utf16().collect();
+        assert_eq!(preceding_text(&units).unwrap(), text);
+        assert_eq!(
+            preceding_text(&units[1..]).unwrap(),
+            "この仕様を確認した。𠮷田さんからの依頼です。"
+        );
+        assert!(preceding_text(&[0xD800]).is_err());
     }
 }

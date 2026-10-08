@@ -165,7 +165,7 @@ impl TextServiceFactory {
                 text_service.tid,
                 text_service.context()?,
                 Rc::new({
-                    let text_len = text.chars().count() as i32;
+                    let text_len = text.encode_utf16().count() as i32;
 
                     // unpadded is all you need!
                     let text = format!("{text}{subtext}").as_str().to_wide_16_unpadded();
@@ -219,7 +219,7 @@ impl TextServiceFactory {
                 text_service.tid,
                 text_service.context()?,
                 Rc::new({
-                    let text_len = text.chars().count() as i32;
+                    let text_len = text.encode_utf16().count() as i32;
                     let subtext = subtext.to_wide_16_unpadded();
                     let context = text_service.context::<ITfContext>()?;
                     let display_attribute_atom = text_service.display_attribute_atom.clone();
