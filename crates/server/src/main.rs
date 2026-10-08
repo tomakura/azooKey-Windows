@@ -1,4 +1,5 @@
 mod engine;
+mod restart;
 
 use azookey_server::TonicNamedPipeServer;
 use engine::Engine;
@@ -10,6 +11,7 @@ use tonic_reflection::server::Builder as ReflectionBuilder;
 
 static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
 static READING: Mutex<()> = Mutex::new(());
+static RESTART_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
 static RESTART: tokio::sync::Notify = tokio::sync::Notify::const_new();
 static SHUTDOWN: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
@@ -110,7 +112,24 @@ impl AzookeyService for MyAzookeyService {
         &self,
         _: Request<RestartEngineRequest>,
     ) -> Result<Response<EngineStatusResponse>, Status> {
-        restart_command().map_err(|error| Status::failed_precondition(error.to_string()))?;
+        use std::os::windows::process::CommandExt;
+        let mut pending = RESTART_CHILD
+            .lock()
+            .map_err(|_| Status::internal("Restart mutex poisoned"))?;
+        let mut command =
+            restart_command().map_err(|error| Status::failed_precondition(error.to_string()))?;
+        command
+            .args(["--wait-for-process", &std::process::id().to_string()])
+            .creation_flags(0x08000000);
+        let pid = restart::spawn_replacement(&mut pending, command).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                Status::failed_precondition(error.to_string())
+            } else {
+                Status::internal(format!("Failed to start replacement engine: {error}"))
+            }
+        })?;
+        println!("AzookeyServer replacement started: {pid}");
+        // Only a successful spawn may shut down the old server. The child waits for our exit.
         RESTART.notify_one();
         Ok(Response::new(EngineStatusResponse {
             process_id: std::process::id(),
@@ -267,12 +286,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(result) = tokio::time::timeout(std::time::Duration::from_secs(3), &mut server).await {
         result??;
     }
-    use std::os::windows::process::CommandExt;
-    let child = restart_command()?
-        .args(["--wait-for-process", &std::process::id().to_string()])
-        .creation_flags(0x08000000)
-        .spawn()?;
-    println!("AzookeyServer restarted: {}", child.id());
     // Close every old named-pipe handle before the child initializes its listener.
     std::process::exit(0)
 }

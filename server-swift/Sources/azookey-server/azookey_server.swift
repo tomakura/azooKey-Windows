@@ -150,7 +150,6 @@ public func load_config() -> UnsafeMutablePointer<CChar> {
         for key in ["prediction", "typo_correction", "dynamic_candidates", "max_candidates", "live_conversion"] {
             next[key] = conversion[key]
         }
-        next["personalizationText"] = ""
         next["personalizationText"] = try personalizationText(zenzai)
         let style = (conversion["input_style"] as? String) ?? "default"
         var nextStyle: InputStyle = .roman2kana
@@ -182,6 +181,7 @@ public func load_config() -> UnsafeMutablePointer<CChar> {
     }
 }
 
+/// Read up to 4096 UTF-8 characters when personalization is enabled and a path is supplied.
 func personalizationText(_ zenzai: [String: Any]) throws -> String {
     guard (zenzai["enable"] as? Bool) ?? false,
           (zenzai["personalization"] as? Bool) ?? false else { return "" }

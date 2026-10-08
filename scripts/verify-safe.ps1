@@ -45,7 +45,7 @@ try {
         }
     }
 
-    Invoke-Checked powershell @('-ExecutionPolicy', 'Bypass', '-File', (Join-Path $repo 'scripts/verify-installer-static.ps1'))
+    Invoke-Checked pwsh @('-ExecutionPolicy', 'Bypass', '-File', (Join-Path $repo 'scripts/verify-installer-static.ps1'))
     Invoke-Checked git @('diff', '--check')
 } finally {
     Pop-Location
