@@ -9,8 +9,7 @@ use windows::Win32::{
     Foundation::HWND,
     UI::{
         Input::KeyboardAndMouse::{
-            SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
-            VIRTUAL_KEY,
+            SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, VIRTUAL_KEY,
         },
         WindowsAndMessaging::{
             SetWindowLongW, GWL_EXSTYLE, GWL_STYLE, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
@@ -117,6 +116,15 @@ pub fn create_indicator_webview(window: &Window) -> Result<WebView> {
                     }
                 </style>
                 <script>
+                    function updateTheme(css) {
+                        let style = document.getElementById('user-theme');
+                        if (!style) {
+                            style = document.createElement('style');
+                            style.id = 'user-theme';
+                            document.head.appendChild(style);
+                        }
+                        style.textContent = css;
+                    }
                     function updateInputMethod(text) {
                         document.querySelector('main').innerText = text;
                     }
@@ -201,14 +209,37 @@ pub fn create_indicator_webview(window: &Window) -> Result<WebView> {
                                 .unwrap_or_default()
                                 .parent()
                                 .map(|p| p.join("azookey_settings.exe"))
-                                .unwrap_or_else(|| std::path::PathBuf::from("azookey_settings.exe")),
+                                .unwrap_or_else(|| {
+                                    std::path::PathBuf::from("azookey_settings.exe")
+                                }),
                         )
                         .spawn();
                     }
                     Some("toggle_learning") => {
-                        let mut config = shared::AppConfig::read();
-                        config.learning.enable = !config.learning.enable;
-                        config.write();
+                        tokio::spawn(async {
+                            let previous = shared::AppConfig::read();
+                            let mut config = previous.clone();
+                            config.learning.enable = !config.learning.enable;
+                            let result = async {
+                                config.try_write()?;
+                                crate::ipc::update_server_config().await
+                            }
+                            .await;
+                            if let Err(error) = result {
+                                let restore = previous.try_write();
+                                let message = windows::core::HSTRING::from(format!(
+                                    "学習設定を更新できませんでした: {error}\n設定の復元: {restore:?}"
+                                ));
+                                unsafe {
+                                    windows::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                                        None,
+                                        &message,
+                                        windows::core::w!("Azookey"),
+                                        windows::Win32::UI::WindowsAndMessaging::MB_ICONERROR,
+                                    );
+                                }
+                            }
+                        });
                     }
                     _ => {}
                 }

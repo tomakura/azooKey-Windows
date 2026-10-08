@@ -1,3 +1,4 @@
+import { changeConfig } from "@/lib/config";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { invoke } from "@tauri-apps/api/core";
@@ -25,17 +26,19 @@ export const Appearance = () => {
                     custom_css_enabled: data.appearance?.custom_css_enabled ?? false,
                 });
             })
-            .catch(() => {});
+            .catch(() => toast("設定の読み込みに失敗しました"));
     }, []);
 
     const updateAppearance = async (patch: Partial<typeof value>) => {
+        const previous = value;
+        setValue((prev) => ({ ...prev, ...patch }));
         try {
-            const data = await invoke<any>("get_config");
-            data.appearance = { ...value, ...patch };
-            await invoke("update_config", { newConfig: data });
-            setValue((prev) => ({ ...prev, ...patch }));
-        } catch {
-            toast("設定の更新に失敗しました");
+            await changeConfig((data) => {
+                data.appearance = { ...data.appearance, ...patch };
+            });
+        } catch (error) {
+            setValue(previous);
+            toast(`設定の更新に失敗しました: ${String(error)}`);
         }
     };
 

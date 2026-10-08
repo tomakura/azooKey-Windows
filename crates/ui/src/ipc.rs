@@ -5,6 +5,20 @@ use shared::proto::{
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
+pub async fn update_server_config() -> anyhow::Result<()> {
+    let channel = tonic::transport::Endpoint::try_from("http://localhost")?
+        .connect_with_connector(tower::service_fn(|_| async {
+            tokio::net::windows::named_pipe::ClientOptions::new()
+                .open(shared::pipe_path("azookey_server"))
+                .map(hyper_util::rt::TokioIo::new)
+        }))
+        .await?;
+    shared::proto::azookey_service_client::AzookeyServiceClient::new(channel)
+        .update_config(shared::proto::UpdateConfigRequest {})
+        .await?;
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct WindowController {
     sender: mpsc::Sender<WindowAction>,

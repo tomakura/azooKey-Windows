@@ -1,3 +1,4 @@
+import { changeConfig } from "@/lib/config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -52,10 +53,7 @@ export const General = () => {
 
     const updateConfig = async (updater: (config: any) => void) => {
         try {
-            const data = await invoke<any>("get_config");
-            updater(data);
-            await invoke("update_config", { newConfig: data });
-            return data;
+            return await changeConfig(updater);
         } catch {
             toast("設定の更新に失敗しました");
             return null;
@@ -186,11 +184,12 @@ export const General = () => {
     const handleSaveInputTable = async () => {
         try {
             await invoke("update_input_table", { content: inputTable });
-            await updateConfig((data) => {
+            const data = await updateConfig((data) => {
                 data.conversion = data.conversion ?? {};
                 data.conversion.input_style = "custom";
                 data.conversion.custom_input_table_path = "";
             });
+            if (!data) return;
             setValue((prev) => ({
                 ...prev,
                 input_style: "custom",
@@ -213,7 +212,7 @@ export const General = () => {
                             ライブ変換
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            入力中にシステム辞書から候補を表示します
+                            入力中の文章を自動で漢字に変換します
                         </p>
                     </div>
                     <Switch checked={value.live_conversion} onCheckedChange={handleLiveConversionChange} />
@@ -280,7 +279,8 @@ export const General = () => {
                                 value={value.custom_input_table_path}
                                 disabled={value.input_style !== "custom"}
                                 placeholder="%APPDATA%\\Azookey\\input_table.tsv"
-                                onChange={(event) => handleCustomInputTablePathChange(event.target.value)}
+                                onChange={(event) => setValue((prev) => ({ ...prev, custom_input_table_path: event.target.value }))}
+                                onBlur={(event) => handleCustomInputTablePathChange(event.target.value)}
                             />
                         </div>
                         <div className="space-y-2">
@@ -400,7 +400,7 @@ export const General = () => {
                     <RefreshCcw />
                     <div className="flex-1 space-y-1">
                         <p className="text-sm font-medium leading-none">
-                            v0.1.0-alpha.1
+                            v0.1.0-alpha.2
                         </p>
                     </div>
                     <Button  variant="secondary">

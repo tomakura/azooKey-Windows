@@ -23,7 +23,7 @@ impl IPCService {
             Endpoint::try_from("http://[::]:50051")?.connect_with_connector(service_fn(
                 |_| async {
                     let client = loop {
-                        match ClientOptions::new().open(r"\\.\pipe\azookey_server") {
+                        match ClientOptions::new().open(shared::pipe_path("azookey_server")) {
                             Ok(client) => break client,
                             Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32) => (),
                             Err(e) => return Err(e),

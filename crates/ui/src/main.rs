@@ -160,6 +160,10 @@ async fn main() -> anyhow::Result<()> {
             } => *control_flow = ControlFlow::Exit,
             Event::UserEvent(script) => match script {
                 UserEvent::UpdateCandidates(candidates) => {
+                    let css = serde_json::to_string(&candidate::theme_css()).unwrap();
+                    candidate_webview
+                        .evaluate_script(&format!("updateTheme({css})"))
+                        .unwrap();
                     candidate_webview
                         .evaluate_script(&format!("updateCandidates({})", candidates))
                         .unwrap();
@@ -170,6 +174,10 @@ async fn main() -> anyhow::Result<()> {
                         .unwrap();
                 }
                 UserEvent::UpdateInputMethod(input_method) => {
+                    let css = serde_json::to_string(&candidate::theme_css()).unwrap();
+                    indicator_webview
+                        .evaluate_script(&format!("updateTheme({css})"))
+                        .unwrap();
                     indicator_webview
                         .evaluate_script(&format!("updateInputMethod(\"{}\")", input_method))
                         .unwrap();
