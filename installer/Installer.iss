@@ -36,8 +36,13 @@ Source: "./Azookey Startup.xml"; Flags: dontcopy noencryption
 Source: "../build/release/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey-{#MyAppVersion}.dll"; Flags: ignoreversion regserver uninsrestartdelete 64bit
 ; Register 32-bit IME DLL
 Source: "../build/release/x86/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey32-{#MyAppVersion}.dll"; Flags: ignoreversion regserver uninsrestartdelete 32bit
+; Keep identical VC runtimes loaded by applications using the previous IME.
+Source: "../build/release/concrt140.dll"; DestDir: "{app}"; Flags: replacesameversion
+Source: "../build/release/msvcp140*.dll"; DestDir: "{app}"; Flags: replacesameversion
+Source: "../build/release/vccorlib140.dll"; DestDir: "{app}"; Flags: replacesameversion
+Source: "../build/release/vcruntime140*.dll"; DestDir: "{app}"; Flags: replacesameversion
 ; All other build artifacts (exes, dictionaries, etc.) — excludes the raw DLLs already handled above
-Source: "../build/release/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "azookey_windows.dll,x86\azookey_windows.dll"
+Source: "../build/release/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "azookey_windows.dll,x86\azookey_windows.dll,\concrt140.dll,\msvcp140*.dll,\vccorlib140.dll,\vcruntime140*.dll"
 
 [Icons]
 Name: "{userprograms}\Azookey\Azookey 設定"; Filename: "{app}\azookey_settings.exe"

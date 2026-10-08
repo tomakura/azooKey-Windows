@@ -37,7 +37,7 @@ cargo test -p azookey-server --bin azookey-server -- --nocapture
 
 2026-10-08に、ユーザー承認を受けてこのPCの既存IMEを更新しました。設定・辞書・学習データは先にバックアップしました。
 
-以下のインストール・解除記録はalpha.2時点です。alpha.3の配布物は検証済みですが、このPCへの更新は管理者確認の取り消しにより未完了です。既存のalpha.2の起動タスクは復帰済みです。
+以下のインストール・解除記録はalpha.2時点です。alpha.3も2026-10-08に更新済みです。更新時の検証結果は後述します。
 
 - インストール終了コード0、Windowsの再起動不要。
 - インストールされた3,471ファイルをSHA256で照合し、配布物と一致。
@@ -69,14 +69,24 @@ Windows操作ヘルパーは未接続です。UIAccess付き候補UIのWebView2�
 - VK_KANA・VK_IME_ON・VK_DBE_HIRAGANAは日本語入力をオンにし、同じキーを繰り返してもオフにしない。VK_IME_OFFで英数へ切り替え。
 - Windows言語バーの右クリックが入力モードを切り替えていた原因を修正し、設定画面を開く。浮動表示には歯車、スタートメニューには「Azookey 設定」を追加。
 - 初回更新では使用中の旧IME DLLが上書きを拒否したため、インストーラーを版ごとのDLL名へ変更。既存アプリが読み込んだ旧DLLを保持し、新しく開くアプリには更新版を登録する。使用中DLLのアンインストール時は削除を再起動後へ延期できるようにした。
+- 続いて旧IMEが読み込んだ`vcruntime140.dll`の置換で停止した。既存ファイルと配布ファイルのSHA256が一致することを確認し、VCランタイムを強制上書き対象から分離した。Inno Setupの`replacesameversion`で、同一バージョン・同一内容を保持し、同じバージョンでも内容が異なる場合は更新する（[公式仕様](https://jrsoftware.org/ishelp/topic_filessection.htm)）。
 - 設定画面の「全般」にエンジン再起動を追加。設定保存後にサーバーへ終了を依頼し、選択したバックエンドで新しいプロセスを起動する。既存IPC接続から異なるPIDの応答を得てから完了と表示する。
 - 実配布版の設定画面をPlaywrightで操作し、ライブ変換の初期値オフ・予測オン、ライブ変換のオン／オフ保存と再読み込みを確認。
 - 最終バイナリでもalpha.3の版表示、再起動ボタン、ライブ変換オフ・予測オンを再確認（`gui-alpha3-final-result.json`、`gui-alpha3-final.png`）。
 - 再起動ボタンを3回操作し、PIDが49384→15760→50976→41132へ変わること、既存接続の再接続、再起動後の漢字変換、実際に読み込まれたllama.dllがCPU→Vulkan→CPUへ変わることを確認。画面の完了表示も確認。
 - 今回の証跡: `safe-input-ux.log`、`swift-test-input-ux.log`、`engine-input-ux-package.log`、`gui-input-ux.log`、`gui-input-ux-result.json`、`restart-input-ux-result.json`、`gui-input-ux.png`（すべて`target/verification`内）。
 
+### alpha.3の実更新
+
+- インストール終了コード0、Windowsの再起動不要。使用中の旧IMEと同一内容のVCランタイムを保持して更新できた。
+- インストールされた全3,471ファイルのSHA256を配布物と照合し、一致。x64/x86のCOM登録がそれぞれ`azookey-0.1.0-alpha.3.dll`、`azookey32-0.1.0-alpha.3.dll`を指し、日本語IMEプロファイルが存在することを確認。
+- 既存設定の内容が保持され、ライブ変換オフ・予測オンを確認。
+- スタートメニューの「Azookey 設定」の配置とリンク先を確認。
+- launcher・候補UI・変換エンジンの起動を確認。入力を変更しない`query --status`でインストール済みエンジンのPID 5072から応答を得た。
+- 証跡: `upgrade-input-ux-result.json`、`upgrade-input-ux.log`、`installer-alpha3-artifact.json`。更新後の実キー操作はユーザー確認待ち。起動中だったアプリは保存して開き直すと新しいIME DLLを読み込む。
+
 ## 生成した配布物
 
-- インストーラー: `build/azookey-setup.exe` (510983531 bytes)
-- SHA256: `A6D3B7BE8FCC8B3548E8C70112580543C3F8D904DABEAF4A18A6E87D31C64D0D`
+- インストーラー: `build/azookey-setup.exe` (510960939 bytes)
+- SHA256: `9B159FB438124CC108359FB9CD1C5E3628DE067262321BAA00C7FFD70F3446A2`
 - ハッシュ一覧: `build/release/manifest.json`、照合用: `build/azookey-setup.exe.sha256`
