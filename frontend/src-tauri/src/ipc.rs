@@ -10,6 +10,8 @@ use windows::Win32::Foundation::ERROR_PIPE_BUSY;
 /// Identify transport failures that permit offline settings and a fresh engine connection.
 pub fn is_connection_error(error: &anyhow::Error) -> bool {
     error.downcast_ref::<tonic::transport::Error>().is_some()
+        // Tonic 0.12 reports its local Endpoint timeout as Cancelled with this source.
+        || error.chain().any(|cause| cause.is::<tonic::TimeoutExpired>())
         || error.downcast_ref::<tonic::Status>().is_some_and(|status| {
             matches!(
                 status.code(),
@@ -245,6 +247,17 @@ impl IPCService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A local RPC timeout is retryable, while an explicit server cancellation is preserved.
+    #[test]
+    fn local_rpc_timeout_is_a_connection_error() {
+        let timeout = tonic::Status::from_error(Box::new(tonic::TimeoutExpired(())));
+        assert_eq!(timeout.code(), tonic::Code::Cancelled);
+        assert!(is_connection_error(&timeout.into()));
+        assert!(!is_connection_error(
+            &tonic::Status::cancelled("Request cancelled by the server").into()
+        ));
+    }
 
     /// Distinguish a live process from an exited process even while its handle is retained.
     #[test]
