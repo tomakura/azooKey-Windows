@@ -1,5 +1,5 @@
 use windows::{
-    core::{IUnknown, Interface as _, BSTR, GUID, PCWSTR},
+    core::{w, IUnknown, Interface as _, BSTR, GUID, PCWSTR},
     Win32::{
         Foundation::{BOOL, E_INVALIDARG, POINT, RECT},
         System::Ole::CONNECT_E_CANNOTCONNECT,
@@ -9,7 +9,11 @@ use windows::{
                 ITfSource_Impl, TfLBIClick, GUID_LBI_INPUTMODE, TF_LANGBARITEMINFO,
                 TF_LBI_CLK_RIGHT, TF_LBI_STYLE_BTN_BUTTON,
             },
-            WindowsAndMessaging::{LoadImageW, HICON, IMAGE_ICON, LR_DEFAULTCOLOR},
+            WindowsAndMessaging::{
+                AppendMenuW, CreatePopupMenu, DestroyMenu, GetForegroundWindow, LoadImageW,
+                TrackPopupMenu, HICON, IMAGE_ICON, LR_DEFAULTCOLOR, MF_STRING, TPM_NONOTIFY,
+                TPM_RETURNCMD, TPM_RIGHTBUTTON,
+            },
         },
     },
 };
@@ -65,8 +69,32 @@ impl ITfLangBarItem_Impl for TextServiceFactory_Impl {
 
 impl ITfLangBarItemButton_Impl for TextServiceFactory_Impl {
     #[macros::anyhow]
-    fn OnClick(&self, click: TfLBIClick, _pt: &POINT, _prcarea: *const RECT) -> Result<()> {
+    fn OnClick(&self, click: TfLBIClick, pt: &POINT, _prcarea: *const RECT) -> Result<()> {
         if click == TF_LBI_CLK_RIGHT {
+            // A right click opens a menu; dismissing it must not change the input mode.
+            let selection = unsafe {
+                let menu = CreatePopupMenu()?;
+                let result = AppendMenuW(menu, MF_STRING, 1, w!("設定を開く"));
+                let selection = result.map(|()| {
+                    TrackPopupMenu(
+                        menu,
+                        TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+                        pt.x,
+                        pt.y,
+                        0,
+                        GetForegroundWindow(),
+                        None,
+                    )
+                    .0
+                });
+                let destroyed = DestroyMenu(menu);
+                let selection = selection?;
+                destroyed?;
+                selection
+            };
+            if selection != 1 {
+                return Ok(());
+            }
             let dll = std::path::PathBuf::from(DllModule::get_path()?);
             let settings = dll
                 .parent()

@@ -1,7 +1,7 @@
 #include "CodeDependencies.iss"
 
 #define MyAppName "Azookey"
-#define MyAppVersion "0.1.0-alpha.3"
+#define MyAppVersion "0.1.0-alpha.4"
 #define MyAppPublisher "fkunn1326"
 #define MyAppURL "https://github.com/fkunn1326/azooKey-Windows/"
 
@@ -137,7 +137,11 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpFinished then
+  begin
     WizardForm.RunList.Visible := False;
+    WizardForm.FinishedLabel.Caption := 'Azookeyのインストールが完了しました。' + #13#10 + #13#10 +
+      '更新前のIMEが起動中のアプリやタスクバーに残ることがあります。作業を保存してWindowsからサインアウトし、再度サインインしてください。';
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
