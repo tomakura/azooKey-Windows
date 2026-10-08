@@ -36,8 +36,11 @@ fn notify_server_config_update(state: &tauri::State<AppState>) -> Result<bool, S
         *ipc = ipc::IPCService::new().ok();
     }
     if let Some(service) = ipc.as_mut() {
-        service.update_config().map_err(|error| error.to_string())?;
-        return Ok(true);
+        match service.update_config() {
+            Ok(()) => return Ok(true),
+            Err(error) if ipc::is_connection_error(&error) => *ipc = None,
+            Err(error) => return Err(error.to_string()),
+        }
     }
     Ok(false)
 }
@@ -62,33 +65,16 @@ fn update_config(state: tauri::State<AppState>, new_config: AppConfig) -> Result
 
 #[tauri::command]
 async fn restart_engine(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let mut service = state
-        .ipc
-        .lock()
-        .map_err(|error| error.to_string())?
-        .clone()
-        .ok_or("変換エンジンに接続されていません")?;
-    let connected =
-        tauri::async_runtime::spawn_blocking(move || -> Result<ipc::IPCService, String> {
-            let previous = service
-                .request_restart()
-                .map_err(|error| error.to_string())?;
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-            let mut last_error = "新しい変換エンジンの応答を待っています".to_string();
-            while std::time::Instant::now() < deadline {
-                match service.process_id() {
-                    Ok(pid) if pid != previous => return Ok(service),
-                    Ok(_) => {}
-                    Err(error) => last_error = error.to_string(),
-                }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            Err(format!(
-                "変換エンジンの再起動を確認できませんでした: {last_error}"
-            ))
-        })
-        .await
-        .map_err(|error| error.to_string())??;
+    let service = state.ipc.lock().map_err(|error| error.to_string())?.take();
+    let connected = tauri::async_runtime::spawn_blocking(move || {
+        let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+        let directory = exe
+            .parent()
+            .ok_or("設定アプリのフォルダーを確認できません")?;
+        ipc::restart_engine(service, directory).map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())??;
     *state.ipc.lock().map_err(|error| error.to_string())? = Some(connected);
     Ok(())
 }

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+pub mod server_process;
+
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/azookey.rs"));
     include!(concat!(env!("OUT_DIR"), "/window.rs"));

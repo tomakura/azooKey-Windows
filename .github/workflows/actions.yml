@@ -1,5 +1,8 @@
 name: Rust
 
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:
@@ -95,10 +98,54 @@ jobs:
         $env:AZOOKEY_TEST_ZENZAI = '1'
         cargo test -p azookey-server --bin azookey-server -- --nocapture
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Push-Location server-swift
+        try {
+          swift test -c release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        } finally { Pop-Location }
+        cargo run -p azookey-server --example engine_lifecycle
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $hash = (Get-FileHash build/azookey-setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$hash  azookey-setup.exe" | Set-Content build/azookey-setup.exe.sha256 -Encoding ascii
 
     - name: Upload Setup Artifact
       uses: actions/upload-artifact@v4
       with:
         name: azookey-setup
-        path: build/azookey-setup.exe
+        path: |
+          build/azookey-setup.exe
+          build/azookey-setup.exe.sha256
         if-no-files-found: error
+
+  release-alpha10:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        name: azookey-setup
+        path: release-assets
+    - name: Publish verified alpha.10
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $tag = 'v0.1.0-alpha.10'
+        if (!(Select-String -LiteralPath installer/Installer.iss -SimpleMatch '#define MyAppVersion "0.1.0-alpha.10"')) {
+          throw 'Installer version does not match the requested release'
+        }
+        $existing = & gh api "repos/$env:GITHUB_REPOSITORY/releases/tags/$tag" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+          Write-Host "$tag already exists; keeping the published release"
+          exit 0
+        }
+        if (($existing -join "`n") -notmatch 'HTTP 404') { throw ($existing -join "`n") }
+        gh release create $tag release-assets/azookey-setup.exe release-assets/azookey-setup.exe.sha256 --target $env:GITHUB_SHA --title $tag --notes-file docs/releases/alpha10.md --prerelease --draft
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        gh release edit $tag --draft=false
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

@@ -63,7 +63,9 @@ $compiler = Get-Command iscc -ErrorAction SilentlyContinue
 if ($compiler) {
     & $compiler.Source installer/Installer.iss
 } else {
-    & "C:\\Program Files\\Inno Setup 7\\ISCC.exe" installer/Installer.iss
+    $compilerPath = @("C:\\Program Files\\Inno Setup 7\\ISCC.exe", "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe", "C:\\Program Files\\Inno Setup 6\\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (!$compilerPath) { throw "Inno Setup compiler was not found" }
+    & $compilerPath installer/Installer.iss
 }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 """

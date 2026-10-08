@@ -1,6 +1,21 @@
 import Testing
+import Foundation
 import KanaKanjiConverterModule
 @testable import azookey_server
+
+@Test func personalizationCanBeEnabledBeforeSelectingAFile() throws {
+    let enabled: [String: Any] = ["enable": true, "personalization": true]
+    #expect(try personalizationText(enabled) == "")
+    #expect(try personalizationText(enabled.merging(["personalization_path": "  \n"]) { _, new in new }) == "")
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".txt")
+    try String(repeating: "猫", count: 5000).write(to: url, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: url) }
+    #expect(try personalizationText(enabled.merging(["personalization_path": url.path]) { _, new in new }) == String(repeating: "猫", count: 4096))
+    #expect(throws: (any Error).self) {
+        try personalizationText(enabled.merging(["personalization_path": url.path + ".missing"]) { _, new in new })
+    }
+    #expect(try personalizationText(["enable": false, "personalization": true, "personalization_path": url.path + ".missing"]) == "")
+}
 
 @Test func mixedEnglishReading() {
     for (raw, expected) in [
