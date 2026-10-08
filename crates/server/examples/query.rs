@@ -35,6 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!(
         "{}",
         serde_json::json!({
+            "process_id": client.engine_status(shared::proto::EngineStatusRequest {}).await?.into_inner().process_id,
             "reading": composed.hiragana,
             "candidates": composed.suggestions.into_iter().map(|item| item.text).collect::<Vec<_>>()
         })

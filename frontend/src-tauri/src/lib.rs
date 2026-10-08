@@ -60,6 +60,39 @@ fn update_config(state: tauri::State<AppState>, new_config: AppConfig) -> Result
     }
 }
 
+#[tauri::command]
+async fn restart_engine(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut service = state
+        .ipc
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone()
+        .ok_or("変換エンジンに接続されていません")?;
+    let connected =
+        tauri::async_runtime::spawn_blocking(move || -> Result<ipc::IPCService, String> {
+            let previous = service
+                .request_restart()
+                .map_err(|error| error.to_string())?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            let mut last_error = "新しい変換エンジンの応答を待っています".to_string();
+            while std::time::Instant::now() < deadline {
+                match service.process_id() {
+                    Ok(pid) if pid != previous => return Ok(service),
+                    Ok(_) => {}
+                    Err(error) => last_error = error.to_string(),
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(format!(
+                "変換エンジンの再起動を確認できませんでした: {last_error}"
+            ))
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+    *state.ipc.lock().map_err(|error| error.to_string())? = Some(connected);
+    Ok(())
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct UserDictionaryEntry {
     reading: String,
@@ -239,6 +272,7 @@ pub fn run() {
             greet,
             get_config,
             update_config,
+            restart_engine,
             get_user_dictionary,
             update_user_dictionary,
             clear_learning_data,

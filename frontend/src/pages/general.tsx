@@ -24,6 +24,8 @@ export const General = () => {
         max_candidates: 16,
     });
     const [inputTable, setInputTable] = useState("");
+    const [restarting, setRestarting] = useState(false);
+    const [restartStatus, setRestartStatus] = useState("");
     const maxCandidatesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
@@ -172,6 +174,23 @@ export const General = () => {
         }, 400);
     };
 
+    const handleRestartEngine = async () => {
+        setRestarting(true);
+        setRestartStatus("変換エンジンを再起動しています…");
+        try {
+            if (maxCandidatesTimer.current) clearTimeout(maxCandidatesTimer.current);
+            await changeConfig((data) => {
+                data.conversion.max_candidates = value.max_candidates;
+            });
+            await invoke("restart_engine");
+            setRestartStatus("変換エンジンを再起動しました");
+        } catch (error) {
+            setRestartStatus(`変換エンジンの再起動に失敗しました: ${String(error)}`);
+        } finally {
+            setRestarting(false);
+        }
+    };
+
     const handleClearLearning = async () => {
         try {
             await invoke("clear_learning_data");
@@ -203,6 +222,20 @@ export const General = () => {
 
     return (
         <div className="space-y-8">
+            <section className="space-y-2">
+                <h1 className="text-sm font-bold text-foreground">変換エンジン</h1>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <RefreshCcw />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium">変換エンジンを再起動</p>
+                        <p className="text-xs text-muted-foreground">バックエンドの変更を反映します。入力を確定してから再起動してください。</p>
+                    </div>
+                    <Button onClick={handleRestartEngine} disabled={restarting}>
+                        {restarting ? "再起動中…" : "再起動"}
+                    </Button>
+                </div>
+                {restartStatus && <p role="status" className="text-sm">{restartStatus}</p>}
+            </section>
             <section className="space-y-2">
                 <h1 className="text-sm font-bold text-foreground">変換</h1>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
@@ -400,7 +433,7 @@ export const General = () => {
                     <RefreshCcw />
                     <div className="flex-1 space-y-1">
                         <p className="text-sm font-medium leading-none">
-                            v0.1.0-alpha.2
+                            v0.1.0-alpha.3
                         </p>
                     </div>
                     <Button  variant="secondary">

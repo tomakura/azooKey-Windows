@@ -76,6 +76,9 @@ message CommitCandidateResponse {}
 
 message ResetLearningRequest {}
 message ResetLearningResponse {}
+message EngineStatusRequest {}
+message EngineStatusResponse { uint32 process_id = 1; }
+message RestartEngineRequest {}
 
 
 // Service definition for text editing operations.
@@ -89,4 +92,6 @@ service AzookeyService {
   rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse);
   rpc CommitCandidate (CommitCandidateRequest) returns (CommitCandidateResponse);
   rpc ResetLearning (ResetLearningRequest) returns (ResetLearningResponse);
+  rpc EngineStatus (EngineStatusRequest) returns (EngineStatusResponse);
+  rpc RestartEngine (RestartEngineRequest) returns (EngineStatusResponse);
 }

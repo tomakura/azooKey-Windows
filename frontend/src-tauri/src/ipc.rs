@@ -20,8 +20,9 @@ impl IPCService {
         let runtime = tokio::runtime::Runtime::new()?;
 
         let server_channel = runtime.block_on(
-            Endpoint::try_from("http://[::]:50051")?.connect_with_connector(service_fn(
-                |_| async {
+            Endpoint::try_from("http://[::]:50051")?
+                .connect_timeout(Duration::from_secs(2))
+                .connect_with_connector(service_fn(|_| async {
                     let client = loop {
                         match ClientOptions::new().open(shared::pipe_path("azookey_server")) {
                             Ok(client) => break client,
@@ -33,8 +34,7 @@ impl IPCService {
                     };
 
                     Ok::<_, std::io::Error>(TokioIo::new(client))
-                },
-            )),
+                })),
         )?;
 
         let azookey_client = AzookeyServiceClient::new(server_channel);
@@ -48,6 +48,22 @@ impl IPCService {
 
 // implement methods to interact with kkc server
 impl IPCService {
+    pub fn process_id(&mut self) -> anyhow::Result<u32> {
+        let response = self.runtime.clone().block_on(
+            self.azookey_client
+                .engine_status(shared::proto::EngineStatusRequest {}),
+        )?;
+        Ok(response.into_inner().process_id)
+    }
+
+    pub fn request_restart(&mut self) -> anyhow::Result<u32> {
+        let response = self.runtime.clone().block_on(
+            self.azookey_client
+                .restart_engine(shared::proto::RestartEngineRequest {}),
+        )?;
+        Ok(response.into_inner().process_id)
+    }
+
     pub fn update_config(&mut self) -> anyhow::Result<()> {
         let request = tonic::Request::new(shared::proto::UpdateConfigRequest {});
         self.runtime
