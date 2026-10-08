@@ -15,10 +15,13 @@ fn main() -> anyhow::Result<()> {
         "cpu" => "llama_cpu",
         "cuda" => "llama_cuda",
         "vulkan" => "llama_vulkan",
-        _ => "llama_cpu",
+        backend => anyhow::bail!("Unknown Zenzai backend: {backend}"),
     };
 
     let backend_path = exe_path.join(backend_dir);
+    if !backend_path.join("llama.dll").is_file() {
+        anyhow::bail!("Missing Zenzai backend: {}", backend_path.display());
+    }
     let backend_path_str = backend_path.to_string_lossy();
 
     let mut new_path = env::var("PATH").unwrap_or_else(|_| String::new());

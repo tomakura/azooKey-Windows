@@ -5,18 +5,23 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-Checked {
+    param([string]$Command, [string[]]$Arguments)
+    & $Command @Arguments
+    if ($LASTEXITCODE -ne 0) { throw "$Command failed with exit code $LASTEXITCODE" }
+}
+
 $repo = Resolve-Path (Join-Path $PSScriptRoot "..")
 Push-Location $repo
 try {
-    cargo fmt -- --check
-    cargo test -p shared
-    cargo test -p azookey-converter
-    cargo test -p azookey-windows --lib
-    cargo check --workspace
-    cargo check -p azookey-windows --target x86_64-pc-windows-msvc
+    Invoke-Checked cargo @('fmt', '--', '--check')
+    Invoke-Checked cargo @('test', '-p', 'shared', '-p', 'azookey-converter', '-p', 'azookey-windows', '--lib')
+    Invoke-Checked cargo @('clippy', '--workspace', '--all-targets', '--', '-D', 'warnings')
+    Invoke-Checked cargo @('check', '--workspace')
+    Invoke-Checked cargo @('check', '-p', 'azookey-windows', '--target', 'x86_64-pc-windows-msvc')
 
     if (-not $SkipX86) {
-        cargo check -p azookey-windows --target i686-pc-windows-msvc
+        Invoke-Checked cargo @('check', '-p', 'azookey-windows', '--target', 'i686-pc-windows-msvc')
     }
 
     if (-not $SkipFrontendBuild) {
@@ -24,22 +29,24 @@ try {
         if (Test-Path $npmCli) {
             Push-Location (Join-Path $repo "frontend")
             try {
-                node $npmCli run build
+                Invoke-Checked node @($npmCli, 'test')
+                Invoke-Checked node @($npmCli, 'run', 'build')
             } finally {
                 Pop-Location
             }
         } else {
             Push-Location (Join-Path $repo "frontend")
             try {
-                npm run build
+                Invoke-Checked npm @('test')
+                Invoke-Checked npm @('run', 'build')
             } finally {
                 Pop-Location
             }
         }
     }
 
-    powershell -ExecutionPolicy Bypass -File (Join-Path $repo "scripts\verify-installer-static.ps1")
-    git diff --check
+    Invoke-Checked powershell @('-ExecutionPolicy', 'Bypass', '-File', (Join-Path $repo 'scripts/verify-installer-static.ps1'))
+    Invoke-Checked git @('diff', '--check')
 } finally {
     Pop-Location
 }

@@ -1,7 +1,7 @@
 #include "CodeDependencies.iss"
 
 #define MyAppName "Azookey"
-#define MyAppVersion "0.1.0-alpha.1"
+#define MyAppVersion "0.1.0-alpha.2"
 #define MyAppPublisher "fkunn1326"
 #define MyAppURL "https://github.com/fkunn1326/azooKey-Windows/"
 
@@ -33,11 +33,11 @@ Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 ; Task scheduler XML — extracted to temp dir only, not installed
 Source: "./Azookey Startup.xml"; Flags: dontcopy noencryption
 ; Register 64-bit IME DLL (also handles DllUnregisterServer on uninstall)
-Source: "../build/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey.dll"; Flags: ignoreversion regserver 64bit
+Source: "../build/release/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey.dll"; Flags: ignoreversion regserver 64bit
 ; Register 32-bit IME DLL
-Source: "../build/x86/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey32.dll"; Flags: ignoreversion regserver 32bit
+Source: "../build/release/x86/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey32.dll"; Flags: ignoreversion regserver 32bit
 ; All other build artifacts (exes, dictionaries, etc.) — excludes the raw DLLs already handled above
-Source: "../build/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "azookey_windows.dll,x86\azookey_windows.dll"
+Source: "../build/release/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "azookey_windows.dll,x86\azookey_windows.dll"
 
 [Run]
 ; Grant AppContainer (sandbox) read/execute on the IME DLLs — required for TSF to load the DLL
@@ -64,6 +64,7 @@ function InitializeSetup: Boolean;
 begin
   Dependency_AddVC2015To2022x64;
   Dependency_AddVC2015To2022x86;
+  Dependency_AddWebView2;
   Result := True;
 end;
 
@@ -90,7 +91,7 @@ begin
   VbsFile := ExpandConstant('{app}\launch.vbs');
   VbsContent :=
     'Set objShell = CreateObject("WScript.Shell")' + #13#10 +
-    'objShell.Run "' + ExpandConstant('{app}\launcher.exe') + '", 0, False' + #13#10;
+    'objShell.Run Chr(34) & "' + ExpandConstant('{app}\launcher.exe') + '" & Chr(34), 0, False' + #13#10;
   SaveStringToFile(VbsFile, VbsContent, False);
 end;
 

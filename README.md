@@ -13,13 +13,15 @@
 - [x] ライブ変換
 - [x] Zenzaiを使用したニューラルかな漢字変換
 
-- [ ] 学習機能
-- [ ] 辞書登録機能
-- [ ] テーマ変更機能
-- [ ] 辞書のインポート/エクスポート機能
-- [ ] いい感じ変換
-- [ ] 個人最適化システム
-- [ ] 予測変換
+- [x] 学習機能
+- [x] 辞書登録機能
+- [x] テーマ変更機能
+- [x] 辞書のインポート/エクスポート機能
+- [x] いい感じ変換
+- [x] 個人最適化システム
+- [x] 予測変換
+
+チェックは機能の実装状況です。配布版の検証記録と、インストール後に必要な実入力の確認は[検証記録](docs/verification.md)を参照してください。
 
 # 設定
 
@@ -31,9 +33,31 @@
 ### バックエンド
 以下の3種類のバックエンドをサポートしています。
 
-- **CPU**: 動作が非常に遅いため、非推奨です。
-- **CUDA**: NvidiaのGPU専用。[CUDA Toolkit 12系](https://developer.nvidia.com/cuda-downloads)をインストールする必要があります。
-- **Vulkan**: GPUのドライバーに標準で含まれているため、追加のインストールは不要です。
+- **CPU**: GPUがない環境でも利用できます。GPU版より推論に時間がかかります。
+- **CUDA**: NVIDIAのGPUと対応するドライバーが必要です。配布版にはバックエンドのDLLを同梱します。
+- **Vulkan**: Vulkanに対応するGPUとドライバーが必要です。
+
+バックエンドの変更後は変換エンジンを再起動してください。モデル、辞書、実行ファイルが不足している場合はエラーを表示します。
+
+### 個人最適化
+
+UTF-8のテキストファイルを指定し、個人最適化を有効にすると、内容を変換プロファイルへ追加します。読み込む上限は4,096文字です。Zenzaiを有効にして使用してください。
+
+## 学習・予測・ライブ変換
+
+確定した候補を学習し、次回以降の変換に利用します。設定画面で学習の有効・無効と学習データの削除を操作できます。ライブ変換を無効にすると、入力中はかなを表示し、SpaceまたはTabで候補を選びます。予測変換は入力途中の読みから候補を表示します。
+
+## ユーザー辞書
+
+読み、候補、品詞を登録し、保存すると変換エンジンへ反映されます。UTF-8のTSVまたはCSVを取り込み、TSVを書き出せます。形式は `読み<TAB>候補<TAB>品詞` または `読み,候補,品詞` です。CSVの引用符とBOMに対応します。取り込み後は「保存」を押してください。設定と辞書は `%APPDATA%\Azookey` に保存されます。
+
+## テーマ
+
+「外観」で背景色、アクセントカラー、文字色またはカスタムCSSを設定できます。実際の候補表示と入力モード表示には次の表示更新時に反映されます。
+
+## いい感じ変換
+
+外部の変換プロバイダーを指定します。実行ファイルへ `--reading <読み> --context <直前の文章>` を渡し、標準出力の各行を候補として読み込みます。実行失敗、空の出力、タイムアウトはエラーとして返します。プロバイダー自体は同梱していません。
 
 # コミュニティ
 
@@ -46,7 +70,7 @@
 ### 開発環境のセットアップ
 
 - [Rust](https://www.rust-lang.org/tools/install)
-- [Swift for Windows](https://www.swift.org/install/windows/) (Swift 6.0以上)
+- [Swift for Windows](https://www.swift.org/install/windows/) (Swift 6.3.2で検証)
 - [protoc](https://protobuf.dev/installation/) 
 - [node.js](https://nodejs.org/en/download/)
 - [inno setup](https://jrsoftware.org/isinfo.php)
@@ -66,18 +90,18 @@ cargo install --force cargo-make
 
 #### ビルド
 ```
-cargo make build [--debug/--release]
+cargo make build --release
 ```
-`--debug`オプションを付けるとデバッグビルド、`--release`オプションを付けるとリリースビルドになります。必ずどちらかを指定してください。
+配布版は`--release`でビルドしてください。CPU、CUDA、Vulkan用のazooKey/llama.cpp b4846 DLLをそれぞれ`llama_cpu`、`llama_cuda`、`llama_vulkan`へ配置し、CPU版の`llama.lib`を`server-swift`へ配置します。`zenz.gguf`もリポジトリ直下へ配置してください。取得元と手順は`.github/workflows/actions.yml`を参照してください。
 
-`build`フォルダーが作成され、ビルドされた実行ファイルが格納されます。
+`build/release`に実行ファイル、辞書、モデル、Swiftランタイムとハッシュ一覧が格納され、`build/azookey-setup.exe`が生成されます。`powershell -ExecutionPolicy Bypass -File scripts/verify-safe.ps1`で安全な検証を実行できます。
 
 `launcher.exe`を管理者権限で実行すると、azookeyの変換エンジンが起動します。
 
 また、IMEを登録する際は以下のように`regsvr32.exe`を使用して登録する必要があります。
-```c
-regsvr32.exe "path/to/build/azookey_windows.dll" /s
-regsvr32.exe "path/to/build/x86/azookey_windows.dll" /s
+```powershell
+& "$env:SystemRoot\System32\regsvr32.exe" "path/to/build/release/azookey_windows.dll" /s
+& "$env:SystemRoot\SysWOW64\regsvr32.exe" "path/to/build/release/x86/azookey_windows.dll" /s
 ```
 逆に登録を解除する場合は`/u`オプションを付けて実行してください。
 

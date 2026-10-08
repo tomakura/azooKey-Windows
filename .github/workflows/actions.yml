@@ -20,19 +20,21 @@ jobs:
     - name: Install Swift
       uses: compnerd/gha-setup-swift@main
       with:
-        branch: swift-6.0.2-release
-        tag: 6.0.2-RELEASE
+        swift-version: swift-6.3.2-release
+        swift-build: 6.3.2-RELEASE
 
-    - name: Fix swift sdk
-      shell: pwsh
-      run: |
-        $SwiftPath = "$env:APPDATA\..\Local\Programs\Swift\Platforms\6.0.2\Windows.platform\Developer\SDKs\Windows.sdk\usr"
-        $modulemapUrl = "https://gist.githubusercontent.com/fkunn1326/ef8be2217082302b291f2b8d4178194a/raw/c424968c250afcd5afa1131aea1329dc0744a7f9/ucrt.modulemap"
-        $destination = "$SwiftPath\share\ucrt.modulemap"
-        Invoke-WebRequest -Uri $modulemapUrl -OutFile $destination
-    
     - name: Install Protoc
       uses: arduino/setup-protoc@v3
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+
+    - name: Install x86 Rust target
+      run: rustup target add i686-pc-windows-msvc
+
+    - name: Install Inno Setup
+      run: choco install innosetup --yes --no-progress
 
     - name: Install cargo-make
       run: cargo install --force cargo-make
@@ -58,9 +60,9 @@ jobs:
         New-Item -Path $llamaCpuDir, $llamaCudaDir, $llamaVulkanDir -ItemType Directory -Force
 
         # Download and extract files
-        Download-Extract -url "https://github.com/fkunn1326/llama.cpp/releases/download/b4846/llama-b4846-bin-win-avx-x64.zip" -destFolder $llamaCpuDir
-        Download-Extract -url "https://github.com/fkunn1326/llama.cpp/releases/download/b4846/llama-b4846-bin-win-cuda-cu12.4-x64.zip" -destFolder $llamaCudaDir
-        Download-Extract -url "https://github.com/fkunn1326/llama.cpp/releases/download/b4846/llama-b4846-bin-win-vulkan-x64.zip" -destFolder $llamaVulkanDir
+        Download-Extract -url "https://github.com/azooKey/llama.cpp/releases/download/b4846/llama-b4846-bin-win-noavx-x64.zip" -destFolder $llamaCpuDir
+        Download-Extract -url "https://github.com/azooKey/llama.cpp/releases/download/b4846/llama-b4846-bin-win-cuda-cu12.4-x64.zip" -destFolder $llamaCudaDir
+        Download-Extract -url "https://github.com/azooKey/llama.cpp/releases/download/b4846/llama-b4846-bin-win-vulkan-x64.zip" -destFolder $llamaVulkanDir
 
         # Copy llama.lib to server-swift
         Copy-Item "$llamaCpuDir\llama.lib" -Destination "server-swift\" -Force
@@ -73,10 +75,26 @@ jobs:
     - name: Install node dependencies
       run: |
         cd frontend
-        npm install
+        npm ci
 
     - name: Build
       run: cargo make build --release
+
+    - name: Verify
+      run: powershell -ExecutionPolicy Bypass -File scripts/verify-safe.ps1
+
+    - name: Verify release package and real CPU converter
+      shell: pwsh
+      run: |
+        powershell -ExecutionPolicy Bypass -File scripts/verify-release.ps1
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cargo build -p azookey-converter --example provider_fixture
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $env:Path = "$PWD/build/release;$PWD/build/release/llama_cpu;$env:Path"
+        $env:AZOOKEY_TEST_RESOURCES = "$PWD/build/release"
+        $env:AZOOKEY_TEST_ZENZAI = '1'
+        cargo test -p azookey-server --bin azookey-server -- --nocapture
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     - name: Upload Setup Artifact
       uses: actions/upload-artifact@v4
