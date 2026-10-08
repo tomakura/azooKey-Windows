@@ -27,6 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "きょうはいいてんきですね",
         "にほんごのぶんしょうをにゅうりょくしてへんかんのそくどをかくにんします",
         "らいしゅうのかいぎではあたらしいぷろじぇくとのすすみぐあいについてほうこくするよていです",
+        "きょう",
     ];
     let mut samples = vec![Vec::new(); inputs.len()];
     let mut candidates = vec![Vec::new(); inputs.len()];
@@ -40,7 +41,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let result = client
                 .convert_text(ConvertTextRequest {
                     reading: (*reading).into(),
-                    raw_input: String::new(),
+                    raw_input: if *reading == "きょう" {
+                        "kyou".into()
+                    } else {
+                        String::new()
+                    },
                     context: "日本語入力の動作を確認しています。".into(),
                     prediction_only: false,
                 })

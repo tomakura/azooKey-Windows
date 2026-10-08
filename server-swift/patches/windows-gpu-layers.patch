@@ -1,5 +1,5 @@
 diff --git a/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/ZenzContext.swift b/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/ZenzContext.swift
-index 6acd0d3..afd37a6 100644
+index 6acd0d3..aa94b96 100644
 --- a/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/ZenzContext.swift
 +++ b/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/ZenzContext.swift
 @@ -59,6 +59,10 @@ final class ZenzContext {
@@ -13,3 +13,19 @@ index 6acd0d3..afd37a6 100644
          #if ZenzaiCPU
          // CPU 専用: GPU へのオフロードを無効化
          model_params.n_gpu_layers = 0
+@@ -91,6 +95,15 @@ final class ZenzContext {
+     }
+
+     func resetContext() throws {
++        #if os(Windows) && Zenzai && !ZenzaiCPU
++        // Retain model execution buffers while clearing all previous sequence data.
++        if llama_supports_gpu_offload() {
++            llama_kv_cache_clear(self.context)
++            self.prevInputBySeq = [:]
++            self.prevPromptBySeq = [:]
++            return
++        }
++        #endif
+         llama_free(self.context)
+         var params = Self.ctx_params
+         #if ZenzaiCPU

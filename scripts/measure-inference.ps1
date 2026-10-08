@@ -2,6 +2,7 @@ param(
     [ValidateSet('cpu','cuda','vulkan')][string]$Backend = 'cuda',
     [string]$Label = 'baseline',
     [string]$SwiftDll,
+    [string]$ServerExe,
     [switch]$RequireGpuOffload
 )
 $ErrorActionPreference = 'Stop'
@@ -12,7 +13,8 @@ $engine = Join-Path $root 'engine'
 $profile = Join-Path $root 'profile'
 New-Item -ItemType Directory -Path $engine,(Join-Path $profile 'Azookey') -Force | Out-Null
 Copy-Item -Path (Join-Path $installed '*.dll') -Destination $engine -Force
-Copy-Item -LiteralPath (Join-Path $installed 'azookey-server.exe') -Destination $engine -Force
+$serverSource = if ($ServerExe) { $ServerExe } else { Join-Path $installed 'azookey-server.exe' }
+Copy-Item -LiteralPath $serverSource -Destination (Join-Path $engine 'azookey-server.exe') -Force
 if ($SwiftDll) { Copy-Item -LiteralPath $SwiftDll -Destination (Join-Path $engine 'azookey-server.dll') -Force }
 foreach ($directory in (Get-ChildItem -LiteralPath $installed -Directory | Where-Object { $_.Name -in @('Dictionary','EmojiDictionary') -or $_.Name -like '*.resources' })) {
     $link = Join-Path $engine $directory.Name
