@@ -124,26 +124,39 @@ Windows操作ヘルパーは未接続です。UIAccess付き候補UIのWebView2�
 
 - CUDAを選んでも、Windows版llama.cppの初期値によりモデル配置が`offloaded 0/13 layers to GPU`だった。GPUは検出され、演算用バッファも作られていたが、モデルとKVキャッシュはCPU側に置かれていた。
 - 固定リビジョン`bbef9d2d`の`ZenzContext.createContext`にWindows用パッチを追加。GPUオフロード対応時は全層を要求し、非対応時とCPU専用ビルドは0層のまま。CUDA/Vulkanの実行ログで`offloaded 13/13 layers to GPU`とGPU側KVキャッシュを確認した。モデル、推論回数、候補数、候補評価方式は変更していない。
+- GPU対応時は、変換終了ごとの推論コンテキスト破棄・再生成をやめ、`llama_kv_cache_clear`で前の文脈と系列データを消去する。Swift側の前回入力・プロンプト情報も空にする。GPUの演算用バッファを再利用する一方、CPUとCPU専用ビルドは従来の再生成処理を維持する。
 - `cargo make`のSwiftビルドで固定リビジョンとパッチを検証・適用する。適用済みの場合は再適用せず、競合や異なるリビジョンは明示的に停止する。現在の依存ソース編集には編集ツールを使った。
 
 RTX 4070 Ti環境で、インストール済みalpha.5サーバーと同じサーバーに修正版Swift DLLを組み合わせ、独立したプロファイル・パイプで計測した。Zenzai有効、同じQ5_K_Mモデル、推論回数1、ライブ変換オフ、学習オフ、同じ文脈。4文章を順番に8周変換し、初周を除く7回の中央値を比較した。各文章で入力が変わるため、同じ変換のキャッシュを繰り返し返す計測ではない。時間はSpace相当のConvertText RPC往復で、辞書処理・モデル評価・文脈再初期化を含む。純粋なモデル演算時間やアプリ描画時間ではない。
 
 | 読みの文字数 | CUDA修正前 | CUDA修正後 | Vulkan修正前 | Vulkan修正後 |
 | --- | ---: | ---: | ---: | ---: |
-| 3 | 122.60ms | 34.75ms | 108.36ms | 39.87ms |
-| 12 | 91.00ms | 38.89ms | 110.03ms | 44.24ms |
-| 35 | 94.02ms | 39.86ms | 120.82ms | 46.68ms |
-| 44 | 104.68ms | 45.43ms | 131.95ms | 52.30ms |
+| 3 | 122.60ms | 23.30ms | 108.36ms | 25.44ms |
+| 12 | 91.00ms | 27.79ms | 110.03ms | 29.79ms |
+| 35 | 94.02ms | 28.22ms | 120.82ms | 31.41ms |
+| 44 | 104.68ms | 33.28ms | 131.95ms | 36.90ms |
 
 - CUDA/Vulkan/CPUすべてで4文章の全候補と並び順が修正前後で一致した。これは限定した回帰確認であり、すべての文章での変換品質を保証するものではない。
 - CPUはGPU配置を変更しないため高速化の対象外。修正前の中央値408〜1,323msに対し、修正後432〜1,367msで、同程度の範囲だった。
-- 最初の変換要求はCUDA 53→44ms、Vulkan 44→153msだった。初回だけのVulkanパイプライン準備等を含むため、初回が必ず速くなるとはしていない。エンジン起動からの総待ち時間は未計測。
+- GPU配置だけの修正ではCUDA 35〜45ms、Vulkan 40〜52msだった。表はGPUバッファ再利用も含む結果。最初の変換要求はCUDA 53→43ms、Vulkan 44→30msだった。初回は変動があり、配置だけの修正時はVulkanで153msも観測した。エンジン起動からの総待ち時間は未計測。
 - 実Swiftエンジンの辞書・学習・設定・FFI回帰テスト、計測コードのclippy、既存全体テスト・clippy・x64/x86チェック・設定画面テストとビルドを実施。
-- 証跡: `target/verification/inference-{baseline,offload}-{cuda,vulkan,cpu}/results.json`と`server-error.log`、`inference-comparison.json`、`test-gpu-engine.log`、`safe-gpu-offload.log`。再計測用は`crates/server/examples/inference_latency.rs`と`scripts/measure-inference.ps1`。
+- 証跡: `target/verification/inference-{baseline,offload,reuse}-{cuda,vulkan,cpu}/results.json`と`server-error.log`、`inference-comparison.json`、`inference-reuse-comparison.json`、`test-gpu-engine.log`、`test-date-gpu-final.log`、`safe-gpu-offload.log`。再計測用は`crates/server/examples/inference_latency.rs`と`scripts/measure-inference.ps1`。
 - 実アプリでの入力・Space変換の体感確認は残る。調査時点でメモ帳とExplorerがalpha.4 DLLを読み込んでいたため、alpha.5以降の非同期入力修正を反映するにはサインアウト・再サインインが必要。
+- 最終配布用EXEとSwift DLLを使い、「きょう」を加えた5文章でも再確認した。CUDAは中央値23.21〜34.72ms、Vulkanは25.11〜37.22ms。「きょう」と「きょうはいいてんきですね」は通常の語句が先頭になり、日付は後ろに残った。実行ログで両GPUバックエンドの13/13層配置を検証した（`inference-packaged-{cuda,vulkan}/results.json`）。
+- 最終配布版で並行予測を含む240キーの入力RPCを再計測し、中央値0.55ms、95パーセンタイル0.78ms、最大1.68msだった。英字保持、SpaceとTabの候補分離、「今日」が日付より前になることも実IPCで確認した。CPU/CUDAそれぞれで実モデルを有効にしたエンジン回帰テストが通った（`test-date-{cpu,gpu}-final.log`）。
+
+## alpha.6の日付候補順
+
+- 「きょう」の変換で「今日」より日付が先頭に出る問題を報告された。動的な日付・時刻候補を、通常変換の先頭へ挿入していたためだった。
+- 通常の語句と登録語の優先を維持し、その後ろへ日付・時刻候補を挿入する。候補数に上限がある場合も通常候補を最低1件確保し、日付候補の枠を残す。外部変換プロバイダーの優先順は変更しない。
+- 実Swiftエンジンを使うテストで修正前の先頭が日付になることを再現。修正後はSpace相当の変換と従来の入力経路で「今日」が先頭になり、日付も候補に残ること、候補数2でも「今日」と日付の両方を取得できることを確認した。
+- 上の推論高速化の候補一致比較は同じRustサーバーでSwift DLLだけを差し替えた結果。最終版では、この日付候補順の修正が別途反映される。
+- 証跡: `target/verification/test-date-priority-before.log`、`test-date-priority-after.log`、`test-date-gpu-final.log`。
+- 実設定のZenzaiでは文脈によって「京」など別の語句が最良候補になるため、特定の単語を固定して昇格させてはいない。配布版IPCの回帰確認では「今日」が日付より前にあることを検証する。「きょう」を追加したSwift DLL単独比較でも、修正前後の候補は一致した（`inference-today-{baseline,reuse}-cuda/results.json`）。
 
 ## 生成した配布物
 
-- インストーラー: `build/azookey-setup.exe` (511040506 bytes)
-- SHA256: `2B719DAD6D48389654ED1F7B40BC946888899072C1F201215E634CD1A6ADADE5`
+- 版: `0.1.0-alpha.6`
+- インストーラー: `build/azookey-setup.exe` (511032526 bytes)
+- SHA256: `F435A54C23AA8BFDB6E7EE1A206CCAB84BA74254032DE1E20CF032F50D4A400B`
 - ハッシュ一覧: `build/release/manifest.json`、照合用: `build/azookey-setup.exe.sha256`
