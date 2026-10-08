@@ -15,6 +15,8 @@ import Testing
     let options = getOptions()
     #expect(options.learningType == .nothing)
     #expect(options.requireJapanesePrediction == .disabled)
+    config["prediction"] = true
+    #expect(getOptions().requireJapanesePrediction == .manualMix)
     #expect(options.typoCorrectionMode == .disabled)
     #expect(options.specialCandidateProviders.isEmpty)
 }

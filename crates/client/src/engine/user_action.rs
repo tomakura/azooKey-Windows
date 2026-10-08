@@ -1,3 +1,4 @@
+use super::input_mode::InputMode;
 use crate::extension::VKeyExt;
 use anyhow::{Context, Result};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardState, ToUnicode, VK_SHIFT};
@@ -16,6 +17,7 @@ pub enum UserAction {
     Function(Function),
     Number(i8),
     ToggleInputMode,
+    SetInputMode(InputMode),
 }
 
 #[derive(Debug)]
@@ -84,7 +86,8 @@ impl TryFrom<usize> for UserAction {
             0x78 => UserAction::Function(Function::Nine), // VK_F9
             0x79 => UserAction::Function(Function::Ten), // VK_F10
 
-            0x15 => UserAction::ToggleInputMode, // VK_KANA (Hiragana/Katakana)
+            0x15 | 0x16 | 0xF2 => UserAction::SetInputMode(InputMode::Kana), // VK_KANA / VK_IME_ON / VK_DBE_HIRAGANA
+            0x1A => UserAction::SetInputMode(InputMode::Latin),              // VK_IME_OFF
             0x19 => UserAction::ToggleInputMode, // VK_KANJI (Hankaku/Zenkaku toggle on JIS keyboard)
             0xF3 | 0xF4 => UserAction::ToggleInputMode, // VK_DBE_SBCSCHAR/VK_DBE_DBCSCHAR
 
@@ -111,5 +114,30 @@ impl TryFrom<usize> for UserAction {
         };
 
         Ok(action)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hiragana_keys_enable_kana_instead_of_toggling() {
+        for key in [0x15, 0x16, 0xF2] {
+            assert!(matches!(
+                UserAction::try_from(key).unwrap(),
+                UserAction::SetInputMode(InputMode::Kana)
+            ));
+        }
+        assert!(matches!(
+            UserAction::try_from(0x1A).unwrap(),
+            UserAction::SetInputMode(InputMode::Latin)
+        ));
+        for key in [0x19, 0xF3, 0xF4] {
+            assert!(matches!(
+                UserAction::try_from(key).unwrap(),
+                UserAction::ToggleInputMode
+            ));
+        }
     }
 }

@@ -103,7 +103,7 @@ impl Default for LearningConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ConversionConfig {
-    #[serde(default = "default_enabled")]
+    #[serde(default)]
     pub live_conversion: bool,
     #[serde(default = "default_enabled")]
     pub prediction: bool,
@@ -128,7 +128,7 @@ pub struct ConversionConfig {
 impl Default for ConversionConfig {
     fn default() -> Self {
         ConversionConfig {
-            live_conversion: default_enabled(),
+            live_conversion: false,
             prediction: default_enabled(),
             typo_correction: default_enabled(),
             dynamic_candidates: default_enabled(),
@@ -299,13 +299,14 @@ mod tests {
     fn config_parse_falls_back_on_invalid_json() {
         let config = parse_config_or_default("{invalid");
         assert_eq!(config.version, default_version());
-        assert!(config.conversion.live_conversion);
+        assert!(!config.conversion.live_conversion);
     }
 
     #[test]
     fn config_parse_migrates_missing_fields_with_defaults() {
         let config = parse_config_or_default(r#"{"version":"old","conversion":{}}"#);
         assert_eq!(config.version, "old");
+        assert!(!config.conversion.live_conversion);
         assert!(config.conversion.prediction);
         assert_eq!(config.conversion.input_style, "default");
         assert_eq!(config.conversion.keyboard_layout, "system");

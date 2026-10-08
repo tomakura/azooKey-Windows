@@ -90,7 +90,7 @@ func getOptions(context: String = "") -> ConvertRequestOptions {
     let emojiURL = emojiDictionaryURL()
     return ConvertRequestOptions(
         N_best: max(1, min(32, (config["max_candidates"] as? Int) ?? 16)),
-        requireJapanesePrediction: ((config["prediction"] as? Bool) ?? true) ? .autoMix : .disabled,
+        requireJapanesePrediction: ((config["prediction"] as? Bool) ?? true) ? .manualMix : .disabled,
         requireEnglishPrediction: .disabled,
         keyboardLanguage: .ja_JP,
         englishCandidateInRoman2KanaInput: false,
@@ -339,7 +339,7 @@ public func get_composed_text(lengthPtr: UnsafeMutablePointer<Int32>) -> UnsafeM
         return to_list_pointer([])
     }
     let converted = converter.requestCandidates(composingText, options: options)
-    lastCandidates = converted.mainResults
+    lastCandidates = converted.mainResults + converted.predictionResults
     // Registered words take priority while remaining available to compound conversion.
     let katakana = toKatakana(hiragana)
     let matched = userEntries.filter { katakana.hasPrefix($0.ruby) }
@@ -347,12 +347,15 @@ public func get_composed_text(lengthPtr: UnsafeMutablePointer<Int32>) -> UnsafeM
         Candidate(text: entry.word, value: -5, composingCount: .surfaceCount(entry.ruby.count),
             lastMid: entry.mid, data: [entry])
     }
-    let candidates = registered + lastCandidates
+    // Keep predictions separate from conversions so live preview never completes untyped text.
+    let limit = max(1, min(100, (config["max_candidates"] as? Int) ?? 16))
+    let predictions = Array(converted.predictionResults.prefix(max(0, limit - 1)))
+    let candidates = (registered + converted.mainResults).prefix(limit - predictions.count).map { ($0, false) }
+        + predictions.map { ($0, true) }
     var result: [FFICandidate] = []
     var seen: Set<String> = []
-    let limit = max(1, min(100, (config["max_candidates"] as? Int) ?? 16))
 
-    for candidate in candidates {
+    for (candidate, isPrediction) in candidates {
         var afterComposingText = composingText
         afterComposingText.prefixComplete(composingCount: candidate.composingCount)
         let correspondingCount = composingText.convertTarget.count - afterComposingText.convertTarget.count
@@ -361,7 +364,7 @@ public func get_composed_text(lengthPtr: UnsafeMutablePointer<Int32>) -> UnsafeM
         let hiragana = _strdup(hiragana)
         let subtext = _strdup(afterComposingText.convertTarget)
 
-        result.append(FFICandidate(text: text, subtext: subtext, hiragana: hiragana, correspondingCount: Int32(correspondingCount)))        
+        result.append(FFICandidate(text: text, subtext: subtext, hiragana: hiragana, correspondingCount: Int32(correspondingCount), isPrediction: isPrediction ? 1 : 0))
         if result.count >= limit { break }
     }
 

@@ -182,6 +182,18 @@ impl TextServiceFactory {
         };
 
         let action = UserAction::try_from(wparam.0)?;
+        if let UserAction::SetInputMode(target) = action {
+            // Repeating the Hiragana key must not switch back to Latin or commit the composition.
+            if target == mode {
+                return Ok(Some((vec![], composition.state)));
+            }
+            let mut actions = Vec::new();
+            if composition.state != CompositionState::None {
+                actions.extend([ClientAction::CommitCandidate, ClientAction::EndComposition]);
+            }
+            actions.push(ClientAction::SetIMEMode(target));
+            return Ok(Some((actions, CompositionState::None)));
+        }
         let conversion_config = shared::AppConfig::read().conversion;
         let candidate_number_selection = conversion_config.candidate_number_selection;
 
@@ -283,14 +295,22 @@ impl TextServiceFactory {
                         ClientAction::SetIMEMode(InputMode::Latin),
                     ],
                 ),
-                UserAction::Space | UserAction::Tab if !conversion_config.live_conversion => (
-                    CompositionState::Previewing,
-                    vec![ClientAction::SetSelection(SetSelectionType::Number(0))],
-                ),
-                UserAction::Space | UserAction::Tab => (
-                    CompositionState::Previewing,
-                    vec![ClientAction::SetSelection(SetSelectionType::Down)],
-                ),
+                UserAction::Space | UserAction::Tab => {
+                    let prediction = matches!(action, UserAction::Tab);
+                    let first = prediction || !conversion_config.live_conversion;
+                    let Some(index) = candidate_for_key(
+                        &composition.candidates,
+                        composition.selection_index,
+                        prediction,
+                        first,
+                    ) else {
+                        return Ok(Some((vec![], composition.state)));
+                    };
+                    (
+                        CompositionState::Previewing,
+                        vec![ClientAction::SetSelection(SetSelectionType::Number(index))],
+                    )
+                }
                 UserAction::Function(key) => match key {
                     Function::Six => (
                         CompositionState::Previewing,
@@ -400,10 +420,21 @@ impl TextServiceFactory {
                         ClientAction::SetIMEMode(InputMode::Latin),
                     ],
                 ),
-                UserAction::Space | UserAction::Tab => (
-                    CompositionState::Previewing,
-                    vec![ClientAction::SetSelection(SetSelectionType::Down)],
-                ),
+                UserAction::Space | UserAction::Tab => {
+                    let prediction = matches!(action, UserAction::Tab);
+                    let Some(index) = candidate_for_key(
+                        &composition.candidates,
+                        composition.selection_index,
+                        prediction,
+                        false,
+                    ) else {
+                        return Ok(Some((vec![], composition.state)));
+                    };
+                    (
+                        CompositionState::Previewing,
+                        vec![ClientAction::SetSelection(SetSelectionType::Number(index))],
+                    )
+                }
                 UserAction::Function(key) => match key {
                     Function::Six => (
                         CompositionState::Previewing,
@@ -525,7 +556,7 @@ impl TextServiceFactory {
                     };
 
                     candidates = ipc_service.append_text(text.clone())?;
-                    selection_index = 0;
+                    selection_index = candidate_for_key(&candidates, 0, false, true).unwrap_or(0);
                     let text = candidates.texts[selection_index as usize].clone();
                     let sub_text = candidates.sub_texts[selection_index as usize].clone();
                     let hiragana = candidates.hiragana.clone();
@@ -549,6 +580,7 @@ impl TextServiceFactory {
                 }
                 ClientAction::RemoveText => {
                     candidates = ipc_service.remove_text()?;
+                    selection_index = candidate_for_key(&candidates, 0, false, true).unwrap_or(0);
                     let empty = "".to_string();
                     let text = candidates
                         .texts
@@ -702,12 +734,11 @@ impl TextServiceFactory {
                         InputMode::Latin => text.to_string(),
                     };
                     candidates = ipc_service.append_text(text)?;
-                    selection_index = 0;
+                    selection_index = candidate_for_key(&candidates, 0, false, true).unwrap_or(0);
 
                     let text = candidates.texts[selection_index as usize].clone();
                     let sub_text = candidates.sub_texts[selection_index as usize].clone();
                     let hiragana = candidates.hiragana.clone();
-                    self.shift_start(&preview, &text)?;
 
                     corresponding_count = candidates.corresponding_count[selection_index as usize];
                     let (text, sub_text) = if !app_config.conversion.live_conversion {
@@ -716,6 +747,8 @@ impl TextServiceFactory {
                     } else {
                         (text, sub_text)
                     };
+                    self.shift_start(&preview, &text)?;
+                    self.set_text(&text, &sub_text)?;
                     preview = text.clone();
                     suffix = sub_text.clone();
                     raw_hiragana = hiragana.clone();
@@ -756,6 +789,30 @@ impl TextServiceFactory {
     }
 }
 
+fn candidate_for_key(
+    candidates: &Candidates,
+    current: i32,
+    prediction: bool,
+    first: bool,
+) -> Option<i32> {
+    let eligible = candidates
+        .is_prediction
+        .iter()
+        .enumerate()
+        .filter(|(_, is_prediction)| **is_prediction == prediction)
+        .map(|(index, _)| index as i32)
+        .collect::<Vec<_>>();
+    if !first && eligible.contains(&current) {
+        eligible
+            .iter()
+            .copied()
+            .find(|index| *index > current)
+            .or_else(|| eligible.first().copied())
+    } else {
+        eligible.first().copied()
+    }
+}
+
 fn candidate_number_to_index(number: i8) -> i32 {
     match number {
         0 => 9,
@@ -766,7 +823,42 @@ fn candidate_number_to_index(number: i8) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{candidate_number_to_index, normalize_kana_input, normalize_keyboard_layout_input};
+    use super::{
+        candidate_for_key, candidate_number_to_index, normalize_kana_input,
+        normalize_keyboard_layout_input, Candidates,
+    };
+
+    #[test]
+    fn space_and_tab_use_separate_candidate_lists() {
+        let candidates = Candidates {
+            texts: ["漢字", "感じ", "漢字変換", "漢字辞典"]
+                .map(String::from)
+                .to_vec(),
+            is_prediction: vec![false, false, true, true],
+            ..Candidates::default()
+        };
+        assert_eq!(candidate_for_key(&candidates, 0, false, true), Some(0));
+        assert_eq!(candidate_for_key(&candidates, 0, false, false), Some(1));
+        assert_eq!(candidate_for_key(&candidates, 1, false, false), Some(0));
+        assert_eq!(candidate_for_key(&candidates, 0, true, true), Some(2));
+        assert_eq!(candidate_for_key(&candidates, 2, true, false), Some(3));
+        assert_eq!(candidate_for_key(&candidates, 3, true, false), Some(2));
+        assert_eq!(candidate_for_key(&candidates, 3, false, false), Some(0));
+    }
+
+    #[test]
+    fn live_preview_skips_predictions_and_tab_does_nothing_without_predictions() {
+        let candidates = Candidates {
+            is_prediction: vec![true, false],
+            ..Candidates::default()
+        };
+        assert_eq!(candidate_for_key(&candidates, 0, false, true), Some(1));
+        let candidates = Candidates {
+            is_prediction: vec![false, false],
+            ..Candidates::default()
+        };
+        assert_eq!(candidate_for_key(&candidates, 0, true, true), None);
+    }
 
     #[test]
     fn maps_number_keys_to_candidate_indexes() {

@@ -25,6 +25,7 @@ pub struct Candidates {
     pub sub_texts: Vec<String>,
     pub hiragana: String,
     pub corresponding_count: Vec<i32>,
+    pub is_prediction: Vec<bool>,
 }
 
 impl IPCService {
@@ -105,6 +106,11 @@ impl IPCService {
                     .iter()
                     .map(|s| s.subtext.clone())
                     .collect(),
+                is_prediction: composing_text
+                    .suggestions
+                    .iter()
+                    .map(|s| s.is_prediction)
+                    .collect(),
                 hiragana: composing_text.hiragana,
                 corresponding_count: composing_text
                     .suggestions
@@ -139,6 +145,11 @@ impl IPCService {
                     .suggestions
                     .iter()
                     .map(|s| s.subtext.clone())
+                    .collect(),
+                is_prediction: composing_text
+                    .suggestions
+                    .iter()
+                    .map(|s| s.is_prediction)
                     .collect(),
                 hiragana: composing_text.hiragana,
                 corresponding_count: composing_text
@@ -185,6 +196,11 @@ impl IPCService {
                     .suggestions
                     .iter()
                     .map(|s| s.subtext.clone())
+                    .collect(),
+                is_prediction: composing_text
+                    .suggestions
+                    .iter()
+                    .map(|s| s.is_prediction)
                     .collect(),
                 hiragana: composing_text.hiragana,
                 corresponding_count: composing_text
@@ -274,7 +290,11 @@ impl IPCService {
             .enumerate()
             .map(|(index, text)| shared::proto::CandidateItem {
                 text: text.clone(),
-                subtext: candidates.sub_texts.get(index).cloned().unwrap_or_default(),
+                subtext: if candidates.is_prediction.get(index) == Some(&true) {
+                    "予測 · Tab".to_string()
+                } else {
+                    candidates.sub_texts.get(index).cloned().unwrap_or_default()
+                },
             })
             .collect();
         let request = tonic::Request::new(shared::proto::SetCandidateRequest {

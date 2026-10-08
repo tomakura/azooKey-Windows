@@ -14,6 +14,7 @@ struct FFICandidate {
     subtext: *mut c_char,
     hiragana: *mut c_char,
     corresponding_count: c_int,
+    is_prediction: c_int,
 }
 
 unsafe extern "C" {
@@ -193,6 +194,7 @@ impl Engine {
                         .to_string_lossy()
                         .into_owned(),
                     corresponding_count: candidate.corresponding_count,
+                    is_prediction: candidate.is_prediction != 0,
                 });
             }
             FreeCandidates(pointer, count);
@@ -213,6 +215,7 @@ impl Engine {
                         text: candidate.text,
                         subtext: candidate.subtext,
                         corresponding_count: candidate.corresponding_count,
+                        is_prediction: false,
                     }),
             );
         }
@@ -228,6 +231,7 @@ impl Engine {
                 text: candidate.text,
                 subtext: candidate.subtext,
                 corresponding_count: candidate.corresponding_count,
+                is_prediction: false,
             }));
         }
         let registered_count = suggestions
@@ -239,12 +243,30 @@ impl Engine {
             text: reading.clone(),
             subtext: String::new(),
             corresponding_count: reading.chars().count() as i32,
+            is_prediction: false,
         });
         let mut seen = HashSet::new();
         suggestions.retain(|candidate| {
             seen.insert((candidate.text.clone(), candidate.corresponding_count))
         });
-        suggestions.truncate(self.config.conversion.max_candidates);
+        let prediction_count = suggestions
+            .iter()
+            .filter(|candidate| candidate.is_prediction)
+            .count()
+            .min(self.config.conversion.max_candidates - 1);
+        let mut normal = suggestions
+            .iter()
+            .filter(|candidate| !candidate.is_prediction)
+            .take(self.config.conversion.max_candidates - prediction_count)
+            .cloned()
+            .collect::<Vec<_>>();
+        normal.extend(
+            suggestions
+                .into_iter()
+                .filter(|candidate| candidate.is_prediction)
+                .take(prediction_count),
+        );
+        let suggestions = normal;
         Ok(ComposingText {
             hiragana: reading,
             suggestions,
@@ -310,12 +332,21 @@ mod tests {
         assert!(result
             .suggestions
             .iter()
-            .any(|candidate| candidate.text == "検証専用語"));
+            .any(|candidate| candidate.text == "検証専用語" && candidate.is_prediction));
+        assert!(result
+            .suggestions
+            .iter()
+            .any(|candidate| !candidate.is_prediction));
+        assert!(!result.suggestions[0].is_prediction);
         engine.clear();
         config.conversion.prediction = false;
         config.write();
         engine.reload().unwrap();
         let result = engine.append("kode").unwrap();
+        assert!(result
+            .suggestions
+            .iter()
+            .all(|candidate| !candidate.is_prediction));
         assert!(!result
             .suggestions
             .iter()

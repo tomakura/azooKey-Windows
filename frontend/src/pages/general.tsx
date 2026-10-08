@@ -12,7 +12,7 @@ import { toast } from "sonner";
 export const General = () => {
     const [value, setValue] = useState({
         learning: true,
-        live_conversion: true,
+        live_conversion: false,
         prediction: true,
         typo_correction: true,
         dynamic_candidates: true,
@@ -31,7 +31,7 @@ export const General = () => {
             .then((data) => {
                 setValue({
                     learning: data.learning?.enable ?? true,
-                    live_conversion: data.conversion?.live_conversion ?? true,
+                    live_conversion: data.conversion?.live_conversion ?? false,
                     prediction: data.conversion?.prediction ?? true,
                     typo_correction: data.conversion?.typo_correction ?? true,
                     dynamic_candidates: data.conversion?.dynamic_candidates ?? true,
@@ -212,7 +212,7 @@ export const General = () => {
                             ライブ変換
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            入力中の文章を自動で漢字に変換します
+                            入力中の文章を自動で漢字に変換します。オフのときはSpaceで変換します
                         </p>
                     </div>
                     <Switch checked={value.live_conversion} onCheckedChange={handleLiveConversionChange} />
@@ -224,7 +224,7 @@ export const General = () => {
                             予測変換
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            入力途中の読みから候補を先読みします
+                            入力途中の予測を候補一覧に表示します。Tabで選択、Enterで確定します
                         </p>
                     </div>
                     <Switch checked={value.prediction} onCheckedChange={handlePredictionChange} />
