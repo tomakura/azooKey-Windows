@@ -149,7 +149,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 result.suggestions
             );
             if input == "kyou" {
-                assert_eq!(result.suggestions[0].text, "今日");
+                let today = result
+                    .suggestions
+                    .iter()
+                    .position(|s| s.text == "今日")
+                    .unwrap();
+                let date = result
+                    .suggestions
+                    .iter()
+                    .position(|s| s.text.contains('年'))
+                    .unwrap();
+                assert!(
+                    today < date,
+                    "Date helpers outranked 今日: {:?}",
+                    result.suggestions
+                );
             }
         }
         checks.push("Space returns normal candidates including typed English");

@@ -289,21 +289,19 @@ impl Engine {
             .iter()
             .take_while(|candidate| self.registered_words.contains(&candidate.text))
             .count();
-        if self.config.conversion.dynamic_candidates {
-            // Date/time helpers must not replace the best ordinary conversion.
-            let insertion = registered_count.max(1).min(suggestions.len());
-            suggestions.splice(
-                insertion..insertion,
-                azookey_converter::dynamic_candidates(&reading)
-                    .into_iter()
-                    .map(|candidate| Suggestion {
-                        text: candidate.text,
-                        subtext: candidate.subtext,
-                        corresponding_count: candidate.corresponding_count,
-                        is_prediction: false,
-                    }),
-            );
-        }
+        let supplemental = if self.config.conversion.dynamic_candidates {
+            azookey_converter::dynamic_candidates(&reading)
+                .into_iter()
+                .map(|candidate| Suggestion {
+                    text: candidate.text,
+                    subtext: candidate.subtext,
+                    corresponding_count: candidate.corresponding_count,
+                    is_prediction: false,
+                })
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         if self.config.magic_conversion.enable {
             let config = &self.config.magic_conversion;
             let extra = azookey_converter::external_candidates(
@@ -337,12 +335,17 @@ impl Engine {
             .filter(|candidate| candidate.is_prediction)
             .count()
             .min(self.config.conversion.max_candidates - 1);
+        // Reserve helper slots, but keep ordinary conversions before dates and times.
+        let supplemental_count = supplemental
+            .len()
+            .min(self.config.conversion.max_candidates - prediction_count - 1);
         let mut normal = suggestions
             .iter()
             .filter(|candidate| !candidate.is_prediction)
-            .take(self.config.conversion.max_candidates - prediction_count)
+            .take(self.config.conversion.max_candidates - prediction_count - supplemental_count)
             .cloned()
             .collect::<Vec<_>>();
+        normal.extend(supplemental.into_iter().take(supplemental_count));
         normal.extend(
             suggestions
                 .into_iter()
