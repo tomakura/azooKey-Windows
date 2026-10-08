@@ -1,17 +1,12 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { toast } from "sonner";
-import { BookOpenText, Plus, Save, Trash2, Upload } from "lucide-react";
+import { BookOpenText, Download, Plus, Save, Trash2, Upload } from "lucide-react";
+import { exportDictionary, parseDictionary, type UserDictionaryEntry } from "@/lib/user-dictionary";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-
-type UserDictionaryEntry = {
-    reading: string;
-    text: string;
-    part_of_speech: string;
-};
 
 export const UserDictionary = () => {
     const [entries, setEntries] = useState<UserDictionaryEntry[]>([]);
@@ -41,27 +36,18 @@ export const UserDictionary = () => {
 
     const saveEntries = async () => {
         try {
-            await invoke("update_user_dictionary", { entries });
-            toast("ユーザー辞書を保存しました");
-        } catch {
-            toast("ユーザー辞書の保存に失敗しました");
+            exportDictionary(entries);
+            const applied = await invoke<boolean>("update_user_dictionary", { entries });
+            toast(applied ? "ユーザー辞書を保存しました" : "ユーザー辞書を保存しました。変換エンジンの次回起動時に反映されます");
+        } catch (error) {
+            toast(`ユーザー辞書の保存に失敗しました: ${String(error)}`);
         }
     };
 
     const importBulkEntries = () => {
-        const imported = bulkText
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter((line) => line && !line.startsWith("#"))
-            .map((line) => {
-                const fields = line.includes("\t") ? line.split("\t") : line.split(",");
-                return {
-                    reading: fields[0]?.trim() ?? "",
-                    text: fields[1]?.trim() ?? "",
-                    part_of_speech: fields[2]?.trim() ?? "",
-                };
-            })
-            .filter((entry) => entry.reading && entry.text);
+        let imported: UserDictionaryEntry[];
+        try { imported = parseDictionary(bulkText); }
+        catch (error) { toast(String(error)); return; }
 
         if (imported.length === 0) {
             toast("取り込める行がありません");
@@ -84,13 +70,25 @@ export const UserDictionary = () => {
         toast(`${imported.length}件を取り込みました`);
     };
 
+    const downloadEntries = () => {
+        try {
+            const content = exportDictionary(entries);
+            const url = URL.createObjectURL(new Blob([content], { type: "text/tab-separated-values;charset=utf-8" }));
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = "azookey-user-dictionary.tsv";
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (error) { toast(String(error)); }
+    };
+
     return (
         <div className="space-y-8">
             <section className="space-y-2">
                 <h1 className="text-sm font-bold text-foreground">ユーザー辞書</h1>
-                <div className="flex items-center space-x-4 rounded-md border p-4">
+                <div className="flex flex-wrap items-center gap-4 rounded-md border p-4">
                     <BookOpenText />
-                    <div className="flex-1 space-y-1">
+                    <div className="min-w-48 flex-1 space-y-1">
                         <p className="text-sm font-medium leading-none">
                             変換候補
                         </p>
@@ -105,6 +103,10 @@ export const UserDictionary = () => {
                     <Button onClick={saveEntries}>
                         <Save />
                         保存
+                    </Button>
+                    <Button variant="secondary" onClick={downloadEntries}>
+                        <Download />
+                        書き出し
                     </Button>
                 </div>
                 <div className="space-y-2 rounded-md border p-4">
@@ -128,6 +130,14 @@ export const UserDictionary = () => {
                             placeholder={"かんじ\t漢字\t普通名詞"}
                             onChange={(event) => setBulkText(event.target.value)}
                         />
+                        <Input type="file" accept=".tsv,.csv,.txt" aria-label="辞書ファイルを読み込む"
+                            onChange={async (event) => {
+                                const file = event.target.files?.[0];
+                                if (file) {
+                                    try { setBulkText(await file.text()); }
+                                    catch (error) { toast(`ファイルを読み込めません: ${String(error)}`); }
+                                }
+                            }} />
                     </div>
                     <div className="grid grid-cols-[1fr_1fr_0.8fr_2.5rem] gap-2 px-1 text-xs text-muted-foreground">
                         <span>読み</span>

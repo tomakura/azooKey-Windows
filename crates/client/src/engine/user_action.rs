@@ -1,3 +1,4 @@
+use super::input_mode::InputMode;
 use crate::extension::VKeyExt;
 use anyhow::{Context, Result};
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardState, ToUnicode, VK_SHIFT};
@@ -9,6 +10,8 @@ pub enum UserAction {
     Enter,
     Space,
     Tab,
+    Muhenkan,
+    Henkan,
     Escape,
     Unknown,
     Navigation(Navigation),
@@ -16,6 +19,7 @@ pub enum UserAction {
     Function(Function),
     Number(i8),
     ToggleInputMode,
+    SetInputMode(InputMode),
 }
 
 #[derive(Debug)]
@@ -43,19 +47,25 @@ impl TryFrom<usize> for UserAction {
             0x09 => UserAction::Tab,       // VK_TAB
             0x0D => UserAction::Enter,     // VK_RETURN
             0x20 => UserAction::Space,     // VK_SPACE
+            0x1C => UserAction::Henkan,    // VK_CONVERT
+            0x1D => UserAction::Muhenkan,  // VK_NONCONVERT
             0x1B => UserAction::Escape,    // VK_ESCAPE
 
-            0x25 => if VK_SHIFT.is_pressed() {
-                UserAction::ShiftedNavigation(Navigation::Left)
-            } else {
-                UserAction::Navigation(Navigation::Left)
-            }, // VK_LEFT
-            0x26 => UserAction::Navigation(Navigation::Up),   // VK_UP
-            0x27 => if VK_SHIFT.is_pressed() {
-                UserAction::ShiftedNavigation(Navigation::Right)
-            } else {
-                UserAction::Navigation(Navigation::Right)
-            }, // VK_RIGHT
+            0x25 => {
+                if VK_SHIFT.is_pressed() {
+                    UserAction::ShiftedNavigation(Navigation::Left)
+                } else {
+                    UserAction::Navigation(Navigation::Left)
+                }
+            } // VK_LEFT
+            0x26 => UserAction::Navigation(Navigation::Up), // VK_UP
+            0x27 => {
+                if VK_SHIFT.is_pressed() {
+                    UserAction::ShiftedNavigation(Navigation::Right)
+                } else {
+                    UserAction::Navigation(Navigation::Right)
+                }
+            } // VK_RIGHT
             0x28 => UserAction::Navigation(Navigation::Down), // VK_DOWN
 
             0x30..=0x39 | 0x60..=0x69 if !VK_SHIFT.is_pressed() => {
@@ -80,8 +90,9 @@ impl TryFrom<usize> for UserAction {
             0x78 => UserAction::Function(Function::Nine), // VK_F9
             0x79 => UserAction::Function(Function::Ten), // VK_F10
 
-            0x15 => UserAction::ToggleInputMode,         // VK_KANA (Hiragana/Katakana)
-            0x19 => UserAction::ToggleInputMode,         // VK_KANJI (Hankaku/Zenkaku toggle on JIS keyboard)
+            0x15 | 0x16 | 0xF2 => UserAction::SetInputMode(InputMode::Kana), // VK_KANA / VK_IME_ON / VK_DBE_HIRAGANA
+            0x1A => UserAction::SetInputMode(InputMode::Latin),              // VK_IME_OFF
+            0x19 => UserAction::ToggleInputMode, // VK_KANJI (Hankaku/Zenkaku toggle on JIS keyboard)
             0xF3 | 0xF4 => UserAction::ToggleInputMode, // VK_DBE_SBCSCHAR/VK_DBE_DBCSCHAR
 
             _ => {
@@ -107,5 +118,42 @@ impl TryFrom<usize> for UserAction {
         };
 
         Ok(action)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jis_conversion_keys_are_recognized() {
+        assert!(matches!(
+            UserAction::try_from(0x1C).unwrap(),
+            UserAction::Henkan
+        ));
+        assert!(matches!(
+            UserAction::try_from(0x1D).unwrap(),
+            UserAction::Muhenkan
+        ));
+    }
+
+    #[test]
+    fn hiragana_keys_enable_kana_instead_of_toggling() {
+        for key in [0x15, 0x16, 0xF2] {
+            assert!(matches!(
+                UserAction::try_from(key).unwrap(),
+                UserAction::SetInputMode(InputMode::Kana)
+            ));
+        }
+        assert!(matches!(
+            UserAction::try_from(0x1A).unwrap(),
+            UserAction::SetInputMode(InputMode::Latin)
+        ));
+        for key in [0x19, 0xF3, 0xF4] {
+            assert!(matches!(
+                UserAction::try_from(key).unwrap(),
+                UserAction::ToggleInputMode
+            ));
+        }
     }
 }

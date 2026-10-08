@@ -12,6 +12,7 @@ fn main() {
 
     tonic_build::configure()
         .build_server(true)
+        .type_attribute("azookey.ConversionClause", "#[derive(serde::Deserialize)]")
         .file_descriptor_set_path(PathBuf::from(out_dir).join("azookey_service_descriptor.bin"))
         .compile_protos(
             &[

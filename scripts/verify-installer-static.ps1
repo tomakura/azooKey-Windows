@@ -10,10 +10,9 @@ $installer = Get-Content $installerPath -Raw
 $makefile = Get-Content $makefilePath -Raw
 
 $requiredInstallerFragments = @(
-    'Source: "../build/azookey_windows.dll"',
-    'Source: "../build/x86/azookey_windows.dll"',
-    'Source: "../build/*"',
-    'Source: "../target/release/bundle/nsis/Azookey_0.1.0_x64-setup.exe"',
+    'Source: "../build/release/azookey_windows.dll"',
+    'Source: "../build/release/x86/azookey_windows.dll"',
+    'Source: "../build/release/*"',
     'Source: "./Azookey Startup.xml"',
     'LoadStringFromFile(TaskXmlPath, TaskXmlContentAnsi);'
 )
@@ -25,11 +24,7 @@ foreach ($fragment in $requiredInstallerFragments) {
 }
 
 $requiredMakefileFragments = @(
-    'cp target/$str/azookey-server.exe build',
-    'cp target/$str/ui.exe build',
-    'cp target/$str/launcher.exe build',
-    'cp -Recurse -Force server-swift/azooKey_emoji_dictionary_storage/EmojiDictionary build',
-    'cp -Recurse -Force server-swift/azooKey_dictionary_storage/Dictionary build',
+    'scripts/stage-release.ps1',
     'node $npmCli run tauri build'
 )
 
@@ -40,3 +35,8 @@ foreach ($fragment in $requiredMakefileFragments) {
 }
 
 Write-Host "Installer static verification passed."
+
+$staging = Get-Content (Join-Path $repo "scripts/stage-release.ps1") -Raw
+foreach ($fragment in @('azookey-server.dll', '*.resources', 'Programs/Swift/Runtimes', 'Dictionary', 'EmojiDictionary', 'zenz.gguf', 'manifest.json')) {
+    if (!$staging.Contains($fragment)) { throw "Package staging is missing: $fragment" }
+}

@@ -43,11 +43,16 @@ pub fn create_candidate_window(event_loop: &EventLoop<UserEvent>) -> Result<Wind
 }
 
 fn build_candidate_html() -> String {
+    let style = format!("<style id=\"user-theme\">{}</style>", theme_css());
+    [CANDIDATE_HTML_HEAD, style.as_str(), CANDIDATE_HTML_TAIL].concat()
+}
+
+pub fn theme_css() -> String {
     let config = shared::AppConfig::read();
     let appearance = &config.appearance;
 
-    let theme_style = if appearance.custom_css_enabled {
-        format!("<style>{}</style>", appearance.custom_css)
+    if appearance.custom_css_enabled {
+        appearance.custom_css.clone()
     } else {
         let is_custom = appearance.background_color != "#FFFFFF"
             || appearance.accent_color != "#2CB5FF"
@@ -58,17 +63,15 @@ fn build_candidate_html() -> String {
             let fg = &appearance.text_color;
             let sel_bg = format!("{accent}33");
             format!(
-                "<style>:root{{--bg:{bg};--accent:{accent};--fg:{fg};--sel-bg:{sel_bg};}}\
+                ":root{{--bg:{bg};--accent:{accent};--fg:{fg};--sel-bg:{sel_bg};}}\
                  body{{color:var(--fg);}}\
                  main{{background-color:var(--bg);border-color:color-mix(in srgb,var(--fg) 15%,transparent);}}\
-                 li[data-selected]{{background-color:var(--sel-bg);outline-color:var(--accent);}}</style>"
+                 li[data-selected]{{background-color:var(--sel-bg);outline-color:var(--accent);}}"
             )
         } else {
             String::new()
         }
-    };
-
-    [CANDIDATE_HTML_HEAD, theme_style.as_str(), CANDIDATE_HTML_TAIL].concat()
+    }
 }
 
 const CANDIDATE_HTML_HEAD: &str = r##"
@@ -199,6 +202,9 @@ const CANDIDATE_HTML_HEAD: &str = r##"
 
 const CANDIDATE_HTML_TAIL: &str = r##"
                 <script>
+                    function updateTheme(css) {
+                        document.getElementById('user-theme').textContent = css;
+                    }
                     function updateCandidates(candidates) {
                         const candidateList = document.getElementById('candidate-list');
 
@@ -317,8 +323,6 @@ const CANDIDATE_HTML_TAIL: &str = r##"
 
 pub fn create_candidate_webview<'a>() -> Result<WebViewBuilder<'a>> {
     let html = build_candidate_html();
-    let webview_builder = WebViewBuilder::new()
-        .with_transparent(true)
-        .with_html(html);
+    let webview_builder = WebViewBuilder::new().with_transparent(true).with_html(html);
     Ok(webview_builder)
 }

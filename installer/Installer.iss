@@ -1,7 +1,7 @@
 #include "CodeDependencies.iss"
 
 #define MyAppName "Azookey"
-#define MyAppVersion "0.1.0-alpha.1"
+#define MyAppVersion "0.1.0-alpha.9"
 #define MyAppPublisher "fkunn1326"
 #define MyAppURL "https://github.com/fkunn1326/azooKey-Windows/"
 
@@ -33,19 +33,27 @@ Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 ; Task scheduler XML — extracted to temp dir only, not installed
 Source: "./Azookey Startup.xml"; Flags: dontcopy noencryption
 ; Register 64-bit IME DLL (also handles DllUnregisterServer on uninstall)
-Source: "../build/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey.dll"; Flags: ignoreversion regserver 64bit
+Source: "../build/release/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey-{#MyAppVersion}.dll"; Flags: ignoreversion regserver uninsrestartdelete 64bit
 ; Register 32-bit IME DLL
-Source: "../build/x86/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey32.dll"; Flags: ignoreversion regserver 32bit
+Source: "../build/release/x86/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey32-{#MyAppVersion}.dll"; Flags: ignoreversion regserver uninsrestartdelete 32bit
+; Keep identical VC runtimes loaded by applications using the previous IME.
+Source: "../build/release/concrt140.dll"; DestDir: "{app}"; Flags: replacesameversion
+Source: "../build/release/msvcp140*.dll"; DestDir: "{app}"; Flags: replacesameversion
+Source: "../build/release/vccorlib140.dll"; DestDir: "{app}"; Flags: replacesameversion
+Source: "../build/release/vcruntime140*.dll"; DestDir: "{app}"; Flags: replacesameversion
 ; All other build artifacts (exes, dictionaries, etc.) — excludes the raw DLLs already handled above
-Source: "../build/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "azookey_windows.dll,x86\azookey_windows.dll"
+Source: "../build/release/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "azookey_windows.dll,x86\azookey_windows.dll,\concrt140.dll,\msvcp140*.dll,\vccorlib140.dll,\vcruntime140*.dll"
+
+[Icons]
+Name: "{userprograms}\Azookey\Azookey 設定"; Filename: "{app}\azookey_settings.exe"
 
 [Run]
 ; Grant AppContainer (sandbox) read/execute on the IME DLLs — required for TSF to load the DLL
 Filename: "icacls"; \
-  Parameters: """{app}\azookey.dll"" /grant ""*S-1-15-2-1:(RX)"""; \
+  Parameters: """{app}\azookey-{#MyAppVersion}.dll"" /grant ""*S-1-15-2-1:(RX)"""; \
   Flags: runhidden runascurrentuser
 Filename: "icacls"; \
-  Parameters: """{app}\azookey32.dll"" /grant ""*S-1-15-2-1:(RX)"""; \
+  Parameters: """{app}\azookey32-{#MyAppVersion}.dll"" /grant ""*S-1-15-2-1:(RX)"""; \
   Flags: runhidden runascurrentuser
 
 [UninstallRun]
@@ -64,6 +72,7 @@ function InitializeSetup: Boolean;
 begin
   Dependency_AddVC2015To2022x64;
   Dependency_AddVC2015To2022x86;
+  Dependency_AddWebView2;
   Result := True;
 end;
 
@@ -90,7 +99,7 @@ begin
   VbsFile := ExpandConstant('{app}\launch.vbs');
   VbsContent :=
     'Set objShell = CreateObject("WScript.Shell")' + #13#10 +
-    'objShell.Run "' + ExpandConstant('{app}\launcher.exe') + '", 0, False' + #13#10;
+    'objShell.Run Chr(34) & "' + ExpandConstant('{app}\launcher.exe') + '" & Chr(34), 0, False' + #13#10;
   SaveStringToFile(VbsFile, VbsContent, False);
 end;
 
@@ -128,7 +137,11 @@ end;
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpFinished then
+  begin
     WizardForm.RunList.Visible := False;
+    WizardForm.FinishedLabel.Caption := 'Azookeyのインストールが完了しました。' + #13#10 + #13#10 +
+      '更新前のIMEが起動中のアプリやタスクバーに残ることがあります。作業を保存してWindowsからサインアウトし、再度サインインしてください。';
+  end;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);

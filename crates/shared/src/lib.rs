@@ -17,6 +17,12 @@ fn get_config_root() -> PathBuf {
 
 const SETTINGS_FILENAME: &str = "settings.json";
 
+/// Independent verification processes use a separate instance without touching the installed IME.
+pub fn pipe_path(name: &str) -> String {
+    let instance = std::env::var("AZOOKEY_INSTANCE").unwrap_or_default();
+    format!(r"\\.\pipe\{name}{instance}")
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ZenzaiConfig {
     #[serde(default)]
@@ -97,7 +103,7 @@ impl Default for LearningConfig {
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ConversionConfig {
-    #[serde(default = "default_enabled")]
+    #[serde(default)]
     pub live_conversion: bool,
     #[serde(default = "default_enabled")]
     pub prediction: bool,
@@ -111,6 +117,8 @@ pub struct ConversionConfig {
     pub custom_input_table_path: String,
     #[serde(default = "default_enabled")]
     pub candidate_number_selection: bool,
+    #[serde(default = "default_muhenkan_action")]
+    pub muhenkan_action: String,
     #[serde(default = "default_symbol_input_style")]
     pub symbol_input_style: String,
     #[serde(default = "default_keyboard_layout")]
@@ -122,13 +130,14 @@ pub struct ConversionConfig {
 impl Default for ConversionConfig {
     fn default() -> Self {
         ConversionConfig {
-            live_conversion: default_enabled(),
+            live_conversion: false,
             prediction: default_enabled(),
             typo_correction: default_enabled(),
             dynamic_candidates: default_enabled(),
             input_style: default_input_style(),
             custom_input_table_path: String::new(),
             candidate_number_selection: default_enabled(),
+            muhenkan_action: default_muhenkan_action(),
             symbol_input_style: default_symbol_input_style(),
             keyboard_layout: default_keyboard_layout(),
             max_candidates: default_max_candidates(),
@@ -195,6 +204,10 @@ fn default_version() -> String {
     "0.1.0".to_string()
 }
 
+fn default_muhenkan_action() -> String {
+    "kana_cycle".to_string()
+}
+
 fn default_zenzai_backend() -> String {
     "cpu".to_string()
 }
@@ -248,15 +261,17 @@ fn default_text_color() -> String {
 }
 
 impl AppConfig {
-    pub fn write(&self) {
+    pub fn try_write(&self) -> std::io::Result<()> {
         let config_path = get_config_root().join(SETTINGS_FILENAME);
-        let Ok(config_str) = serde_json::to_string_pretty(self) else {
-            return;
-        };
-        if let Some(parent) = config_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
+        let config_str = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
+        std::fs::create_dir_all(get_config_root())?;
+        std::fs::write(config_path, config_str)
+    }
+
+    pub fn write(&self) {
+        if let Err(error) = self.try_write() {
+            eprintln!("Failed to save settings: {error}");
         }
-        let _ = std::fs::write(config_path, config_str);
     }
 
     pub fn read() -> Self {
@@ -291,13 +306,19 @@ mod tests {
     fn config_parse_falls_back_on_invalid_json() {
         let config = parse_config_or_default("{invalid");
         assert_eq!(config.version, default_version());
-        assert!(config.conversion.live_conversion);
+        assert!(!config.conversion.live_conversion);
     }
 
     #[test]
     fn config_parse_migrates_missing_fields_with_defaults() {
+        let legacy: ConversionConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.muhenkan_action, "kana_cycle");
+        let latin: ConversionConfig =
+            serde_json::from_str(r#"{"muhenkan_action":"latin"}"#).unwrap();
+        assert_eq!(latin.muhenkan_action, "latin");
         let config = parse_config_or_default(r#"{"version":"old","conversion":{}}"#);
         assert_eq!(config.version, "old");
+        assert!(!config.conversion.live_conversion);
         assert!(config.conversion.prediction);
         assert_eq!(config.conversion.input_style, "default");
         assert_eq!(config.conversion.keyboard_layout, "system");

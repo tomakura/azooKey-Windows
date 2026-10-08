@@ -6,22 +6,39 @@
 > 現在開発中であるため、安定性や機能に関しては保証できません。使用する際は自己責任でお願いします。
 
 # インストール方法
-[Release](https://github.com/fkunn1326/azooKey-Windows/releases)から`azookey-setup.exe`をダウンロードし、インストーラーを実行してください。
+[Releases](https://github.com/tomakura/azooKey-Windows/releases)から`azookey-setup.exe`をダウンロードし、インストーラーを実行してください。同じリリースの`azookey-setup.exe.sha256`でSHA256を確認できます。
+
+更新後は、作業を保存してWindowsからサインアウトし、再度サインインしてください。起動中のアプリやタスクバーには旧IMEが残ることがあり、設定画面からのエンジン再起動だけではIME本体を更新できません。
+
+# 最新の配布版: 0.1.0-alpha.9
+
+[alpha.9のダウンロード](https://github.com/tomakura/azooKey-Windows/releases/tag/v0.1.0-alpha.9)
+
+- 標準ローマ字入力で日本語文中の英単語を保持します。例: `kyouhagoogledekensaku` → Spaceで`今日はgoogleで検索`。かな入力と区別しにくい綴りはかなを優先します。
+- ライブ変換は初期状態でオフです。Spaceで通常変換、Tabで予測候補を選択します。入力中の予測は別処理で生成し、本文へ自動挿入しません。
+- 未確定のまま左右キーで文節を移動し、Shift＋左右で文節の境界を伸縮できます。変換キーと、動作を設定できる無変換キーに対応します。
+- 設定画面から変換エンジンを再起動できます。入力モード表示の歯車、言語バーの右クリック、スタートメニューから設定画面を開けます。
+
+実サーバーの240キー入力では応答の中央値0.71ms、95パーセンタイル1.18msを確認しました。既存44例の変換回帰セットは先頭一致44/44件です。これは小規模な自動検証の結果で、実アプリへの打鍵や描画を含みません。alpha.9への更新インストールと再サインイン後の実入力確認は残っています。詳しい条件と制約は[検証記録](docs/verification.md)を参照してください。
 
 # 機能
 
 - [x] ライブ変換
 - [x] Zenzaiを使用したニューラルかな漢字変換
 
-- [ ] 学習機能
-- [ ] 辞書登録機能
-- [ ] テーマ変更機能
-- [ ] 辞書のインポート/エクスポート機能
-- [ ] いい感じ変換
-- [ ] 個人最適化システム
-- [ ] 予測変換
+- [x] 学習機能
+- [x] 辞書登録機能
+- [x] テーマ変更機能
+- [x] 辞書のインポート/エクスポート機能
+- [x] いい感じ変換
+- [x] 個人最適化システム
+- [x] 予測変換
+
+チェックは機能の実装状況です。配布版の検証記録と、インストール後に必要な実入力の確認は[検証記録](docs/verification.md)を参照してください。
 
 # 設定
+
+スタートメニューの「Azookey 設定」、入力モード表示の歯車ボタン、またはWindows言語バーの「あ／A」を右クリックして「設定を開く」を選ぶと開けます。実行ファイルは `%APPDATA%\Azookey\azookey_settings.exe` です。
 
 ## Zenzai
 
@@ -31,9 +48,39 @@
 ### バックエンド
 以下の3種類のバックエンドをサポートしています。
 
-- **CPU**: 動作が非常に遅いため、非推奨です。
-- **CUDA**: NvidiaのGPU専用。[CUDA Toolkit 12系](https://developer.nvidia.com/cuda-downloads)をインストールする必要があります。
-- **Vulkan**: GPUのドライバーに標準で含まれているため、追加のインストールは不要です。
+- **CPU**: GPUがない環境でも利用できます。GPU版より推論に時間がかかります。
+- **CUDA**: NVIDIAのGPUと対応するドライバーが必要です。配布版にはバックエンドのDLLを同梱します。
+- **Vulkan**: Vulkanに対応するGPUとドライバーが必要です。
+
+バックエンドの変更後は、設定画面の「全般」から「変換エンジンを再起動」を押してください。モデル、辞書、実行ファイルが不足している場合はエラーを表示します。
+
+CUDA/Vulkanではモデル全層をGPUへ配置し、推論バッファを変換間で再利用します。計測条件と結果は[検証記録](docs/verification.md)を参照してください。
+
+### 個人最適化
+
+UTF-8のテキストファイルを指定し、個人最適化を有効にすると、内容を変換プロファイルへ追加します。読み込む上限は4,096文字です。Zenzaiを有効にして使用してください。
+
+## 学習・予測・ライブ変換
+
+確定した候補を学習し、次回以降の変換に利用します。設定画面で学習の有効・無効と学習データの削除を操作できます。ライブ変換は初期状態でオフです。オフの間は、通常変換の要求とZenzaiの推論をSpaceなどの明示的な変換操作まで遅らせます。入力中はかなを表示し、辞書による予測候補だけを別処理で生成して候補一覧に表示します。Tabで予測候補を選び、Spaceで通常変換の候補に切り替え、Enterで確定します。ライブ変換をオンにしても、予測候補は自動で本文に挿入しません。ひらがなキーは日本語入力をオンにします。
+
+日本語モードでも、Shift＋英字で始めた単語は確定するまで英字を保持します（例: `Windows`）。標準ローマ字入力では、辞書で判定した英単語を日本語文中でも英字で保持します（例: `kyouhagoogledekensaku` → `きょうはgoogleでけんさく` → Spaceで`今日はgoogleで検索`）。`make`のように通常のローマ字かな入力と区別しにくい綴りはかなを優先します。判定できない単語はSpaceの元の綴り候補やF10を利用できます。AZIKとカスタム入力表では自動判定を行わず、それぞれの入力表を優先します。
+
+英日混在入力の方針は[Meltype](https://github.com/yksr-melt/Meltype)を参考にしています。本体のコードは取り込まず、SCOWLの英単語データと独自の区間判定を利用しています。辞書の出典とライセンスは[通知](server-swift/Sources/azookey-server/Resources/README.md)を参照してください。
+
+変換中は左右キーで対象の文節を移動し、Shift＋左右で対象文節の境界を1文字ずつ伸縮できます。移動や伸縮では確定せず、Enterで確定します。未変換の入力中に左右キーを押すと、通常変換して文節の選択に入ります。変換キーは入力中にはSpaceと同じ通常変換、未入力時には日本語入力をオンにします。無変換キーは既定でカタカナ→半角カタカナ→ひらがなを順に切り替え、設定画面の「無変換キー」で英数モードへの切り替えにも変更できます。
+
+## ユーザー辞書
+
+読み、候補、品詞を登録し、保存すると変換エンジンへ反映されます。UTF-8のTSVまたはCSVを取り込み、TSVを書き出せます。形式は `読み<TAB>候補<TAB>品詞` または `読み,候補,品詞` です。CSVの引用符とBOMに対応します。取り込み後は「保存」を押してください。設定と辞書は `%APPDATA%\Azookey` に保存されます。
+
+## テーマ
+
+「外観」で背景色、アクセントカラー、文字色またはカスタムCSSを設定できます。実際の候補表示と入力モード表示には次の表示更新時に反映されます。
+
+## いい感じ変換
+
+外部の変換プロバイダーを指定します。実行ファイルへ `--reading <読み> --context <直前の文章>` を渡し、標準出力の各行を候補として読み込みます。実行失敗、空の出力、タイムアウトはエラーとして返します。プロバイダー自体は同梱していません。
 
 # コミュニティ
 
@@ -46,7 +93,7 @@
 ### 開発環境のセットアップ
 
 - [Rust](https://www.rust-lang.org/tools/install)
-- [Swift for Windows](https://www.swift.org/install/windows/) (Swift 6.0以上)
+- [Swift for Windows](https://www.swift.org/install/windows/) (Swift 6.3.2で検証)
 - [protoc](https://protobuf.dev/installation/) 
 - [node.js](https://nodejs.org/en/download/)
 - [inno setup](https://jrsoftware.org/isinfo.php)
@@ -66,18 +113,20 @@ cargo install --force cargo-make
 
 #### ビルド
 ```
-cargo make build [--debug/--release]
+cargo make build --release
 ```
-`--debug`オプションを付けるとデバッグビルド、`--release`オプションを付けるとリリースビルドになります。必ずどちらかを指定してください。
+配布版は`--release`でビルドしてください。CPU、CUDA、Vulkan用のazooKey/llama.cpp b4846 DLLをそれぞれ`llama_cpu`、`llama_cuda`、`llama_vulkan`へ配置し、CPU版の`llama.lib`を`server-swift`へ配置します。`zenz.gguf`もリポジトリ直下へ配置してください。取得元と手順は`.github/workflows/actions.yml`を参照してください。
 
-`build`フォルダーが作成され、ビルドされた実行ファイルが格納されます。
+`cargo make`のSwiftビルドでは、固定した変換器リビジョンへ`server-swift/patches/windows-gpu-layers.patch`を適用します。Swiftを直接ビルドする場合も、`swift package resolve`後に`scripts/prepare-swift-dependency.ps1`を実行してください。パッチの競合や別リビジョンを検出した場合は停止します。
+
+`build/release`に実行ファイル、辞書、モデル、Swiftランタイムとハッシュ一覧が格納され、`build/azookey-setup.exe`が生成されます。`powershell -ExecutionPolicy Bypass -File scripts/verify-safe.ps1`で安全な検証を実行できます。
 
 `launcher.exe`を管理者権限で実行すると、azookeyの変換エンジンが起動します。
 
 また、IMEを登録する際は以下のように`regsvr32.exe`を使用して登録する必要があります。
-```c
-regsvr32.exe "path/to/build/azookey_windows.dll" /s
-regsvr32.exe "path/to/build/x86/azookey_windows.dll" /s
+```powershell
+& "$env:SystemRoot\System32\regsvr32.exe" "path/to/build/release/azookey_windows.dll" /s
+& "$env:SystemRoot\SysWOW64\regsvr32.exe" "path/to/build/release/x86/azookey_windows.dll" /s
 ```
 逆に登録を解除する場合は`/u`オプションを付けて実行してください。
 

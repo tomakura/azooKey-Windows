@@ -7,3 +7,5 @@ logs/*
 *.gguf
 *.dll
 *.lib
+llama_cpu/
+llama_vulkan/

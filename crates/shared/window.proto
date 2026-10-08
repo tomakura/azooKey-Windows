@@ -24,6 +24,8 @@ message CandidateItem {
 message SetCandidateRequest {
   repeated string candidates = 1;
   repeated CandidateItem candidate_items = 2;
+  string request_id = 3;
+  bool activate = 4;
 }
 
 // 変換候補を選択するメッセージ

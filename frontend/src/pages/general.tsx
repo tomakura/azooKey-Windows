@@ -1,3 +1,4 @@
+import { changeConfig } from "@/lib/config";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -11,18 +12,21 @@ import { toast } from "sonner";
 export const General = () => {
     const [value, setValue] = useState({
         learning: true,
-        live_conversion: true,
+        live_conversion: false,
         prediction: true,
         typo_correction: true,
         dynamic_candidates: true,
         input_style: "default",
         custom_input_table_path: "",
         candidate_number_selection: true,
+        muhenkan_action: "kana_cycle",
         symbol_input_style: "japanese",
         keyboard_layout: "system",
         max_candidates: 16,
     });
     const [inputTable, setInputTable] = useState("");
+    const [restarting, setRestarting] = useState(false);
+    const [restartStatus, setRestartStatus] = useState("");
     const maxCandidatesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
@@ -30,13 +34,14 @@ export const General = () => {
             .then((data) => {
                 setValue({
                     learning: data.learning?.enable ?? true,
-                    live_conversion: data.conversion?.live_conversion ?? true,
+                    live_conversion: data.conversion?.live_conversion ?? false,
                     prediction: data.conversion?.prediction ?? true,
                     typo_correction: data.conversion?.typo_correction ?? true,
                     dynamic_candidates: data.conversion?.dynamic_candidates ?? true,
                     input_style: data.conversion?.input_style ?? "default",
                     custom_input_table_path: data.conversion?.custom_input_table_path ?? "",
                     candidate_number_selection: data.conversion?.candidate_number_selection ?? true,
+                    muhenkan_action: data.conversion?.muhenkan_action ?? "kana_cycle",
                     symbol_input_style: data.conversion?.symbol_input_style ?? "japanese",
                     keyboard_layout: data.conversion?.keyboard_layout ?? "system",
                     max_candidates: data.conversion?.max_candidates ?? 16,
@@ -52,10 +57,7 @@ export const General = () => {
 
     const updateConfig = async (updater: (config: any) => void) => {
         try {
-            const data = await invoke<any>("get_config");
-            updater(data);
-            await invoke("update_config", { newConfig: data });
-            return data;
+            return await changeConfig(updater);
         } catch {
             toast("設定の更新に失敗しました");
             return null;
@@ -150,6 +152,16 @@ export const General = () => {
         }
     };
 
+    const handleMuhenkanActionChange = async (muhenkan_action: string) => {
+        const data = await updateConfig((data) => {
+            data.conversion = data.conversion ?? {};
+            data.conversion.muhenkan_action = muhenkan_action;
+        });
+        if (data) {
+            setValue((prev) => ({ ...prev, muhenkan_action }));
+        }
+    };
+
     const handleKeyboardLayoutChange = async (keyboard_layout: string) => {
         const data = await updateConfig((data) => {
             data.conversion = data.conversion ?? {};
@@ -174,6 +186,23 @@ export const General = () => {
         }, 400);
     };
 
+    const handleRestartEngine = async () => {
+        setRestarting(true);
+        setRestartStatus("変換エンジンを再起動しています…");
+        try {
+            if (maxCandidatesTimer.current) clearTimeout(maxCandidatesTimer.current);
+            await changeConfig((data) => {
+                data.conversion.max_candidates = value.max_candidates;
+            });
+            await invoke("restart_engine");
+            setRestartStatus("変換エンジンを再起動しました");
+        } catch (error) {
+            setRestartStatus(`変換エンジンの再起動に失敗しました: ${String(error)}`);
+        } finally {
+            setRestarting(false);
+        }
+    };
+
     const handleClearLearning = async () => {
         try {
             await invoke("clear_learning_data");
@@ -186,11 +215,12 @@ export const General = () => {
     const handleSaveInputTable = async () => {
         try {
             await invoke("update_input_table", { content: inputTable });
-            await updateConfig((data) => {
+            const data = await updateConfig((data) => {
                 data.conversion = data.conversion ?? {};
                 data.conversion.input_style = "custom";
                 data.conversion.custom_input_table_path = "";
             });
+            if (!data) return;
             setValue((prev) => ({
                 ...prev,
                 input_style: "custom",
@@ -205,6 +235,20 @@ export const General = () => {
     return (
         <div className="space-y-8">
             <section className="space-y-2">
+                <h1 className="text-sm font-bold text-foreground">変換エンジン</h1>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <RefreshCcw />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium">変換エンジンを再起動</p>
+                        <p className="text-xs text-muted-foreground">バックエンドの変更を反映します。入力を確定してから再起動してください。</p>
+                    </div>
+                    <Button onClick={handleRestartEngine} disabled={restarting}>
+                        {restarting ? "再起動中…" : "再起動"}
+                    </Button>
+                </div>
+                {restartStatus && <p role="status" className="text-sm">{restartStatus}</p>}
+            </section>
+            <section className="space-y-2">
                 <h1 className="text-sm font-bold text-foreground">変換</h1>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <WandSparkles />
@@ -213,7 +257,7 @@ export const General = () => {
                             ライブ変換
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            入力中にシステム辞書から候補を表示します
+                            入力中の文章を自動で漢字に変換します。オフのときはSpaceで変換します
                         </p>
                     </div>
                     <Switch checked={value.live_conversion} onCheckedChange={handleLiveConversionChange} />
@@ -225,7 +269,7 @@ export const General = () => {
                             予測変換
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            入力途中の読みから候補を先読みします
+                            入力を待たせずに予測候補だけを表示します。Tabで選択、Enterで確定します
                         </p>
                     </div>
                     <Switch checked={value.prediction} onCheckedChange={handlePredictionChange} />
@@ -280,7 +324,8 @@ export const General = () => {
                                 value={value.custom_input_table_path}
                                 disabled={value.input_style !== "custom"}
                                 placeholder="%APPDATA%\\Azookey\\input_table.tsv"
-                                onChange={(event) => handleCustomInputTablePathChange(event.target.value)}
+                                onChange={(event) => setValue((prev) => ({ ...prev, custom_input_table_path: event.target.value }))}
+                                onBlur={(event) => handleCustomInputTablePathChange(event.target.value)}
                             />
                         </div>
                         <div className="space-y-2">
@@ -306,6 +351,24 @@ export const General = () => {
                         </p>
                     </div>
                     <Switch checked={value.learning} onCheckedChange={handleLearningChange} />
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Keyboard />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
+                            無変換キー
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            入力中の無変換キーの動作を選択します。変換キーは通常変換です
+                        </p>
+                    </div>
+                    <Select value={value.muhenkan_action} onValueChange={handleMuhenkanActionChange}>
+                        <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="kana_cycle">ひらがな・カタカナ切り替え</SelectItem>
+                            <SelectItem value="latin">英数モードへ切り替え</SelectItem>
+                        </SelectContent>
+                    </Select>
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <Keyboard />
@@ -400,7 +463,7 @@ export const General = () => {
                     <RefreshCcw />
                     <div className="flex-1 space-y-1">
                         <p className="text-sm font-medium leading-none">
-                            v0.1.0-alpha.1
+                            v0.1.0-alpha.9
                         </p>
                     </div>
                     <Button  variant="secondary">

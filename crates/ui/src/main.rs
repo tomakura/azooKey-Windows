@@ -53,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
     let window_controller = WindowController::new(tx.clone());
     let grpc_service = WindowService {
         controller: window_controller.clone(),
+        candidate_request: tokio::sync::Mutex::default(),
     };
 
     // start grpc server
@@ -147,6 +148,8 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    let mut composition_visible = false;
+    let mut has_candidates = false;
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
@@ -160,6 +163,10 @@ async fn main() -> anyhow::Result<()> {
             } => *control_flow = ControlFlow::Exit,
             Event::UserEvent(script) => match script {
                 UserEvent::UpdateCandidates(candidates) => {
+                    let css = serde_json::to_string(&candidate::theme_css()).unwrap();
+                    candidate_webview
+                        .evaluate_script(&format!("updateTheme({css})"))
+                        .unwrap();
                     candidate_webview
                         .evaluate_script(&format!("updateCandidates({})", candidates))
                         .unwrap();
@@ -170,6 +177,10 @@ async fn main() -> anyhow::Result<()> {
                         .unwrap();
                 }
                 UserEvent::UpdateInputMethod(input_method) => {
+                    let css = serde_json::to_string(&candidate::theme_css()).unwrap();
+                    indicator_webview
+                        .evaluate_script(&format!("updateTheme({css})"))
+                        .unwrap();
                     indicator_webview
                         .evaluate_script(&format!("updateInputMethod(\"{}\")", input_method))
                         .unwrap();
@@ -181,6 +192,7 @@ async fn main() -> anyhow::Result<()> {
                 UserEvent::WindowAction(action) => {
                     match action {
                         WindowAction::Show => {
+                            composition_visible = true;
                             // if mode indicator is already shown, hide it
                             let mut task_guard = match task_guard.try_lock() {
                                 Ok(guard) => guard,
@@ -204,11 +216,16 @@ async fn main() -> anyhow::Result<()> {
                             let _ = unsafe {
                                 ShowWindow(
                                     HWND(candidate_window.hwnd() as *mut std::ffi::c_void),
-                                    SW_SHOWNOACTIVATE,
+                                    if has_candidates {
+                                        SW_SHOWNOACTIVATE
+                                    } else {
+                                        SW_HIDE
+                                    },
                                 )
                             };
                         }
                         WindowAction::Hide => {
+                            composition_visible = false;
                             let _ = unsafe {
                                 ShowWindow(
                                     HWND(candidate_window.hwnd() as *mut std::ffi::c_void),
@@ -258,6 +275,17 @@ async fn main() -> anyhow::Result<()> {
                             ));
                         }
                         WindowAction::SetCandidate { candidates } => {
+                            has_candidates = !candidates.is_empty();
+                            unsafe {
+                                let _ = ShowWindow(
+                                    HWND(candidate_window.hwnd() as *mut std::ffi::c_void),
+                                    if composition_visible && has_candidates {
+                                        SW_SHOWNOACTIVATE
+                                    } else {
+                                        SW_HIDE
+                                    },
+                                );
+                            }
                             let max_len = candidates
                                 .iter()
                                 .map(|candidate| {

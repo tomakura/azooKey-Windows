@@ -30,27 +30,66 @@ fn get_config(state: tauri::State<AppState>) -> AppConfig {
     config.clone()
 }
 
-fn notify_server_config_update(state: &tauri::State<AppState>) {
-    let Ok(mut ipc) = state.ipc.lock() else {
-        return;
-    };
+fn notify_server_config_update(state: &tauri::State<AppState>) -> Result<bool, String> {
+    let mut ipc = state.ipc.lock().map_err(|error| error.to_string())?;
     if ipc.is_none() {
         *ipc = ipc::IPCService::new().ok();
     }
     if let Some(service) = ipc.as_mut() {
-        if service.update_config().is_err() {
-            *ipc = None;
+        service.update_config().map_err(|error| error.to_string())?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+#[tauri::command]
+fn update_config(state: tauri::State<AppState>, new_config: AppConfig) -> Result<bool, String> {
+    let mut config = state.settings.lock().unwrap();
+    new_config.try_write().map_err(|error| error.to_string())?;
+    match notify_server_config_update(&state) {
+        Ok(applied) => {
+            *config = new_config;
+            Ok(applied)
+        }
+        Err(error) => {
+            config
+                .try_write()
+                .map_err(|restore| format!("{error}; restoring settings: {restore}"))?;
+            Err(error)
         }
     }
 }
 
 #[tauri::command]
-fn update_config(state: tauri::State<AppState>, new_config: AppConfig) -> Result<(), String> {
-    let mut config = state.settings.lock().unwrap();
-    *config = new_config;
-    config.write();
-
-    notify_server_config_update(&state);
+async fn restart_engine(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut service = state
+        .ipc
+        .lock()
+        .map_err(|error| error.to_string())?
+        .clone()
+        .ok_or("変換エンジンに接続されていません")?;
+    let connected =
+        tauri::async_runtime::spawn_blocking(move || -> Result<ipc::IPCService, String> {
+            let previous = service
+                .request_restart()
+                .map_err(|error| error.to_string())?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            let mut last_error = "新しい変換エンジンの応答を待っています".to_string();
+            while std::time::Instant::now() < deadline {
+                match service.process_id() {
+                    Ok(pid) if pid != previous => return Ok(service),
+                    Ok(_) => {}
+                    Err(error) => last_error = error.to_string(),
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(format!(
+                "変換エンジンの再起動を確認できませんでした: {last_error}"
+            ))
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+    *state.ipc.lock().map_err(|error| error.to_string())? = Some(connected);
     Ok(())
 }
 
@@ -78,8 +117,10 @@ fn input_table_path() -> Result<PathBuf, String> {
 #[tauri::command]
 fn get_user_dictionary() -> Result<Vec<UserDictionaryEntry>, String> {
     let path = user_dictionary_path()?;
-    let Ok(content) = std::fs::read_to_string(path) else {
-        return Ok(Vec::new());
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.to_string()),
     };
 
     let entries = content
@@ -107,7 +148,7 @@ fn get_user_dictionary() -> Result<Vec<UserDictionaryEntry>, String> {
 fn update_user_dictionary(
     state: tauri::State<AppState>,
     entries: Vec<UserDictionaryEntry>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let path = user_dictionary_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -115,21 +156,24 @@ fn update_user_dictionary(
 
     let content = entries
         .into_iter()
-        .filter_map(|entry| {
-            let reading = entry.reading.trim().replace(['\t', '\r', '\n'], "");
-            let text = entry.text.trim().replace(['\t', '\r', '\n'], "");
-            let part_of_speech = entry.part_of_speech.trim().replace(['\t', '\r', '\n'], "");
-            if reading.is_empty() || text.is_empty() {
-                return None;
+        .map(|entry| {
+            let reading = entry.reading.trim();
+            let text = entry.text.trim();
+            let part_of_speech = entry.part_of_speech.trim();
+            if reading.is_empty()
+                || text.is_empty()
+                || [reading, text, part_of_speech]
+                    .iter()
+                    .any(|field| field.contains(['\t', '\r', '\n']))
+            {
+                return Err("Invalid dictionary entry".to_string());
             }
-            Some(format!("{reading}\t{text}\t{part_of_speech}"))
+            Ok(format!("{reading}\t{text}\t{part_of_speech}"))
         })
-        .collect::<Vec<_>>()
+        .collect::<Result<Vec<_>, String>>()?
         .join("\n");
     std::fs::write(path, content).map_err(|error| error.to_string())?;
-    notify_server_config_update(&state);
-
-    Ok(())
+    notify_server_config_update(&state)
 }
 
 #[tauri::command]
@@ -154,7 +198,11 @@ fn clear_learning_data(state: tauri::State<AppState>) -> Result<(), String> {
 #[tauri::command]
 fn get_input_table() -> Result<String, String> {
     let path = input_table_path()?;
-    Ok(std::fs::read_to_string(path).unwrap_or_default())
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(content),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 #[tauri::command]
@@ -164,25 +212,27 @@ fn update_input_table(state: tauri::State<AppState>, content: String) -> Result<
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
 
-    let sanitized = content
+    let validated = content
         .lines()
-        .filter_map(|line| {
+        .enumerate()
+        .map(|(index, line)| {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
-                return Some(line.to_string());
+                return Ok(line.to_string());
             }
-            let mut fields = line.splitn(2, '\t');
-            let key = fields.next()?.trim().replace(['\t', '\r', '\n'], "");
-            let value = fields.next()?.trim().replace(['\t', '\r', '\n'], "");
-            if key.is_empty() || value.is_empty() {
-                return None;
+            let fields: Vec<_> = line.split('\t').collect();
+            if fields.len() != 2 || fields.iter().any(|field| field.trim().is_empty()) {
+                return Err(format!(
+                    "Invalid input table row {}: expected key<TAB>value",
+                    index + 1
+                ));
             }
-            Some(format!("{key}\t{value}"))
+            Ok(format!("{}\t{}", fields[0].trim(), fields[1].trim()))
         })
-        .collect::<Vec<_>>()
+        .collect::<Result<Vec<_>, String>>()?
         .join("\n");
-    std::fs::write(path, sanitized).map_err(|error| error.to_string())?;
-    notify_server_config_update(&state);
+    std::fs::write(path, validated).map_err(|error| error.to_string())?;
+    notify_server_config_update(&state)?;
 
     Ok(())
 }
@@ -196,43 +246,19 @@ struct Capability {
 
 #[tauri::command]
 fn check_capability() -> Capability {
-    // cuda:
-    // cudart64_12.dll
-    // cublas64_12.dll
-
-    // vulkan:
-    // vulkan-1.dllの存在確認
-
-    let mut capability = Capability {
-        cpu: true,
-        cuda: false,
-        vulkan: false,
-    };
-
-    // Check for CUDA availability
-    let cuda_files = ["cudart64_12.dll", "cublas64_12.dll"];
-    let cuda_available = cuda_files.iter().all(|file| {
-        // Check if the file exists in system path or in the current directory
-        std::env::var("PATH")
-            .unwrap_or_default()
-            .split(';')
-            .map(PathBuf::from)
-            .chain(std::iter::once(std::env::current_dir().unwrap_or_default()))
-            .any(|path| path.join(file).exists())
-    });
-    capability.cuda = cuda_available;
-
-    // Check for Vulkan availability
-    let vulkan_file = "vulkan-1.dll";
-    let vulkan_available = std::env::var("PATH")
-        .unwrap_or_default()
-        .split(';')
-        .map(PathBuf::from)
-        .chain(std::iter::once(std::env::current_dir().unwrap_or_default()))
-        .any(|path| path.join(vulkan_file).exists());
-    capability.vulkan = vulkan_available;
-
-    capability
+    let directory = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32");
+    Capability {
+        cpu: directory.join("llama_cpu/llama.dll").is_file(),
+        cuda: directory.join("llama_cuda/llama.dll").is_file()
+            && system.join("nvcuda.dll").is_file(),
+        vulkan: directory.join("llama_vulkan/llama.dll").is_file()
+            && system.join("vulkan-1.dll").is_file(),
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -246,6 +272,7 @@ pub fn run() {
             greet,
             get_config,
             update_config,
+            restart_engine,
             get_user_dictionary,
             update_user_dictionary,
             clear_learning_data,

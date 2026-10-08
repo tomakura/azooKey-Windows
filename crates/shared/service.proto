@@ -2,21 +2,30 @@ syntax = "proto3";
 
 package azookey;
 
+message ConversionClause {
+  string text = 1;
+  int32 corresponding_count = 2;
+}
+
 message Suggestion {
   string text = 1;    // The main suggestion text.
   string subtext = 2; // Additional information or subtext for the suggestion.
   int32 corresponding_count = 3;
+  bool is_prediction = 4;
+  repeated ConversionClause clauses = 5;
 }
 
 // ComposingText represents the text and its associated suggestions.
 message ComposingText {
   string hiragana = 1; // The main text content.
   repeated Suggestion suggestions = 2; // List of suggestions for the text.
+  string raw_input = 3;
 }
 
 // Request message for AppendText.
 message AppendTextRequest {
   string text_to_append = 1; // The text to append to the current content.
+  bool preview_only = 2;
 }
 
 // Response message for AppendText.
@@ -25,7 +34,7 @@ message AppendTextResponse {
 }
 
 // Request message for RemoveText.
-message RemoveTextRequest {}
+message RemoveTextRequest { bool preview_only = 1; }
 
 // Response message for RemoveText.
 message RemoveTextResponse {
@@ -40,6 +49,7 @@ message MoveCursorRequest {
 // Request message for ShrinkText.
 message ShrinkTextRequest {
   int32 offset = 1;
+  bool preview_only = 2;
 }
 
 message ShrinkTextResponse {
@@ -52,7 +62,7 @@ message MoveCursorResponse {
 }
 
 // Request message for ClearText.
-message ClearTextRequest {}
+message ClearTextRequest { bool preview_only = 1; }
 
 // Response message for ClearText.
 message ClearTextResponse {}
@@ -75,10 +85,21 @@ message CommitCandidateResponse {}
 
 message ResetLearningRequest {}
 message ResetLearningResponse {}
+message EngineStatusRequest {}
+message EngineStatusResponse { uint32 process_id = 1; }
+message RestartEngineRequest {}
+
+message ConvertTextRequest {
+  string reading = 1;
+  string context = 2;
+  bool prediction_only = 3;
+  string raw_input = 4;
+}
 
 
 // Service definition for text editing operations.
 service AzookeyService {
+  rpc ConvertText (ConvertTextRequest) returns (AppendTextResponse);
   rpc AppendText (AppendTextRequest) returns (AppendTextResponse);
   rpc RemoveText (RemoveTextRequest) returns (RemoveTextResponse);
   rpc ShrinkText (ShrinkTextRequest) returns (ShrinkTextResponse);
@@ -88,4 +109,6 @@ service AzookeyService {
   rpc UpdateConfig (UpdateConfigRequest) returns (UpdateConfigResponse);
   rpc CommitCandidate (CommitCandidateRequest) returns (CommitCandidateResponse);
   rpc ResetLearning (ResetLearningRequest) returns (ResetLearningResponse);
+  rpc EngineStatus (EngineStatusRequest) returns (EngineStatusResponse);
+  rpc RestartEngine (RestartEngineRequest) returns (EngineStatusResponse);
 }

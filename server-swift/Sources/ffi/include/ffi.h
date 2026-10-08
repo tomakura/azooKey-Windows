@@ -10,4 +10,6 @@ struct FFICandidate {
     char *subtext;
     char *hiragana;
     int correspondingCount;
+    int isPrediction;
+    char *clauses;
 };

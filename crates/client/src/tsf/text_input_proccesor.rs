@@ -110,6 +110,12 @@ impl ITfTextInputProcessor_Impl for TextServiceFactory_Impl {
     fn Deactivate(&self) -> Result<()> {
         tracing::debug!("Deactivated");
 
+        let ipc_service = IMEState::get()?.ipc_service.clone();
+        if let Some(mut ipc_service) = ipc_service {
+            ipc_service.hide_window()?;
+            ipc_service.clear_text()?;
+        }
+
         // remove reference to the dll instance
         let mut dll_instance = DllModule::get()?;
         dll_instance.release();

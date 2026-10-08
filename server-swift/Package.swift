@@ -38,11 +38,13 @@ let package = Package(
                 .product(name: "KanaKanjiConverterModule", package: "AzooKeyKanaKanjiConverter"),
                 "ffi"
             ],
+            resources: [.process("Resources")],
             swiftSettings: [.interoperabilityMode(.Cxx)]
         ),
         .testTarget(
             name: "azookey-serverTests",
-            dependencies: ["azookey-server"]
+            dependencies: ["azookey-server"],
+            swiftSettings: [.interoperabilityMode(.Cxx)]
         ),
     ]
 )

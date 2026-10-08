@@ -1,4 +1,4 @@
-import { BookOpenText, Bot, Settings, Megaphone } from "lucide-react"
+import { BookOpenText, Bot, Settings, Megaphone, Palette } from "lucide-react"
 
 import {
     Sidebar,
@@ -19,11 +19,11 @@ const contents = [
         url: "/",
         icon: Settings,
     },
-    // {
-    //     title: "外観",
-    //     url: "/appearance",
-    //     icon: Palette,
-    // },
+    {
+        title: "外観",
+        url: "/appearance",
+        icon: Palette,
+    },
     {
         title: "Zenzai",
         url: "/zenzai",

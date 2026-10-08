@@ -5,6 +5,20 @@ use shared::proto::{
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
+pub async fn update_server_config() -> anyhow::Result<()> {
+    let channel = tonic::transport::Endpoint::try_from("http://localhost")?
+        .connect_with_connector(tower::service_fn(|_| async {
+            tokio::net::windows::named_pipe::ClientOptions::new()
+                .open(shared::pipe_path("azookey_server"))
+                .map(hyper_util::rt::TokioIo::new)
+        }))
+        .await?;
+    shared::proto::azookey_service_client::AzookeyServiceClient::new(channel)
+        .update_config(shared::proto::UpdateConfigRequest {})
+        .await?;
+    Ok(())
+}
+
 #[derive(Debug, Clone)]
 pub struct WindowController {
     sender: mpsc::Sender<WindowAction>,
@@ -52,6 +66,7 @@ pub enum WindowAction {
 #[derive(Debug)]
 pub struct WindowService {
     pub controller: WindowController,
+    pub candidate_request: tokio::sync::Mutex<String>,
 }
 
 #[tonic::async_trait]
@@ -100,6 +115,13 @@ impl WindowServiceProto for WindowService {
         request: Request<SetCandidateRequest>,
     ) -> Result<Response<EmptyResponse>, Status> {
         let request = request.into_inner();
+        // Serialize activation and delivery so an older prediction cannot overwrite new input.
+        let mut active = self.candidate_request.lock().await;
+        if request.activate {
+            *active = request.request_id.clone();
+        } else if *active != request.request_id {
+            return Ok(Response::new(EmptyResponse {}));
+        }
         let candidates = if request.candidate_items.is_empty() {
             request
                 .candidates
@@ -149,5 +171,42 @@ impl WindowServiceProto for WindowService {
             .await?;
 
         Ok(Response::new(EmptyResponse {}))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn stale_predictions_cannot_replace_new_input_or_conversion() {
+        let (sender, mut receiver) = mpsc::channel(8);
+        let service = WindowService {
+            controller: WindowController::new(sender),
+            candidate_request: tokio::sync::Mutex::default(),
+        };
+        for (id, activate, text) in [
+            ("old", true, ""),
+            ("new", true, ""),
+            ("old", false, "古い予測"),
+            ("new", false, "新しい予測"),
+            ("space", true, "通常変換"),
+            ("new", false, "遅れた予測"),
+        ] {
+            service
+                .set_candidate(Request::new(SetCandidateRequest {
+                    candidates: vec![text.into()],
+                    candidate_items: vec![],
+                    request_id: id.into(),
+                    activate,
+                }))
+                .await
+                .unwrap();
+        }
+        let mut displayed = Vec::new();
+        while let Ok(WindowAction::SetCandidate { candidates }) = receiver.try_recv() {
+            displayed.push(candidates[0].text.clone());
+        }
+        assert_eq!(displayed, ["", "", "新しい予測", "通常変換"]);
     }
 }

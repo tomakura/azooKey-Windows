@@ -1,3 +1,4 @@
+import { changeConfig } from "@/lib/config";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -53,12 +54,9 @@ export const Zenzai = () => {
         personalization: false,
         personalization_path: "",
         backend: "",
-        inference_limit: 1,
-        timeout_ms: 1500,
+        inference_limit: 2,
         model_path: "",
-        command_path: "",
         prediction: false,
-        prediction_token_limit: 32,
     });
     const [magicConversion, setMagicConversion] = useState({
         enable: false,
@@ -83,12 +81,9 @@ export const Zenzai = () => {
                     personalization: zenzai.personalization ?? false,
                     personalization_path: zenzai.personalization_path ?? "",
                     backend: zenzai.backend,
-                    inference_limit: zenzai.inference_limit ?? 1,
-                    timeout_ms: zenzai.timeout_ms ?? 1500,
+                    inference_limit: zenzai.inference_limit ?? 2,
                     model_path: zenzai.model_path ?? "",
-                    command_path: zenzai.command_path ?? "",
                     prediction: zenzai.prediction ?? false,
-                    prediction_token_limit: zenzai.prediction_token_limit ?? 32,
                 });
                 const magic = data.magic_conversion ?? {};
                 setMagicConversion({
@@ -98,7 +93,7 @@ export const Zenzai = () => {
                 });
             })
             .catch(() => {
-                // Keep default values if config fetch fails
+                toast("設定の読み込みに失敗しました");
             });
 
         invoke("check_capability").then((capability: any) => {
@@ -112,12 +107,9 @@ export const Zenzai = () => {
 
     const updateConfig = async (updater: (config: any) => void) => {
         try {
-            const data = await invoke<any>("get_config");
-            updater(data);
-            await invoke("update_config", { newConfig: data });
-            return data;
+            return await changeConfig(updater);
         } catch (error) {
-            toast("設定の更新に失敗しました");
+            toast(`設定の更新に失敗しました: ${String(error)}`);
             return null;
         }
     };
@@ -167,6 +159,7 @@ export const Zenzai = () => {
         
         if (data) {
             setValue((prev) => ({ ...prev, backend }));
+            toast("バックエンドの変更は変換エンジンを再起動すると反映されます");
             toast("バックエンドが変更されました", {
                 description: "変更を適用するには、IMEサーバーを再起動してください",
                 duration: 10000,
@@ -183,30 +176,12 @@ export const Zenzai = () => {
         });
     };
 
-    const handleCommandPathChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const command_path = event.target.value;
-        setValue((prev) => ({ ...prev, command_path }));
-
-        updateConfig((data) => {
-            data.zenzai.command_path = command_path;
-        });
-    };
-
     const handleInferenceLimitChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const inference_limit = Math.max(1, Number(event.target.value) || 1);
+        const inference_limit = Math.min(8, Math.max(1, Math.round(Number(event.target.value) || 1)));
         setValue((prev) => ({ ...prev, inference_limit }));
 
         updateConfig((data) => {
             data.zenzai.inference_limit = inference_limit;
-        });
-    };
-
-    const handleTimeoutChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const timeout_ms = Math.max(100, Number(event.target.value) || 1500);
-        setValue((prev) => ({ ...prev, timeout_ms }));
-
-        updateConfig((data) => {
-            data.zenzai.timeout_ms = timeout_ms;
         });
     };
 
@@ -218,15 +193,6 @@ export const Zenzai = () => {
         if (data) {
             setValue((prev) => ({ ...prev, prediction: data.zenzai.prediction }));
         }
-    };
-
-    const handlePredictionTokenLimitChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const prediction_token_limit = Math.max(4, Number(event.target.value) || 32);
-        setValue((prev) => ({ ...prev, prediction_token_limit }));
-
-        updateConfig((data) => {
-            data.zenzai.prediction_token_limit = prediction_token_limit;
-        });
     };
 
     const handleMagicConversionChange = async () => {
@@ -283,7 +249,7 @@ export const Zenzai = () => {
                             Zenzai予測
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            Zenzaiに読みから追加候補を生成させます
+                            ライブ変換オン時に、Zenzaiで続きを予測します。ライブ変換オフ時の入力中予測は辞書から生成します
                         </p>
                     </div>
                     <Switch checked={value.prediction} disabled={!value.enable} onCheckedChange={handleZenzaiPredictionChange} />
@@ -300,7 +266,7 @@ export const Zenzai = () => {
                             </p>
                         </div>
                     </div>
-                    <Textarea placeholder="例）山田太郎、数学科の学生。" value={value.profile} disabled={!value.enable} onChange={handleProfileChange} />
+                    <Textarea placeholder="例）山田太郎、数学科の学生。" value={value.profile} disabled={!value.enable} onChange={(event) => setValue((prev) => ({ ...prev, profile: event.target.value }))} onBlur={handleProfileChange} />
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <User />
@@ -326,7 +292,7 @@ export const Zenzai = () => {
                             </p>
                         </div>
                     </div>
-                    <Input placeholder="C:\\path\\to\\personalization.txt" value={value.personalization_path} disabled={!value.enable || !value.personalization} onChange={handlePersonalizationPathChange} />
+                    <Input placeholder="C:\\path\\to\\personalization.txt" value={value.personalization_path} disabled={!value.enable} onChange={(event) => setValue((prev) => ({ ...prev, personalization_path: event.target.value }))} onBlur={handlePersonalizationPathChange} />
                 </div>
                 <div className="space-y-4 rounded-md border p-4">
                     <div className="flex items-center space-x-4">
@@ -340,58 +306,23 @@ export const Zenzai = () => {
                             </p>
                         </div>
                     </div>
-                    <Input placeholder="C:\\path\\to\\zenz.gguf" value={value.model_path} disabled={!value.enable} onChange={handleModelPathChange} />
+                    <Input placeholder="C:\\path\\to\\zenz.gguf" value={value.model_path} disabled={!value.enable} onChange={(event) => setValue((prev) => ({ ...prev, model_path: event.target.value }))} onBlur={handleModelPathChange} />
                 </div>
-                <div className="space-y-4 rounded-md border p-4">
-                    <div className="flex items-center space-x-4">
-                        <SquareTerminal />
-                        <div className="flex-1 space-y-1">
-                            <p className="text-sm font-medium leading-none">
-                                llama.cpp CLI
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                                空欄の場合は選択中のバックエンドからPATH経由でllama-cli.exeを使用します
-                            </p>
-                        </div>
-                    </div>
-                    <Input placeholder="C:\\path\\to\\llama-cli.exe" value={value.command_path} disabled={!value.enable} onChange={handleCommandPathChange} />
-                </div>
+
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <Gauge />
                     <div className="flex-1 space-y-1">
                         <p className="text-sm font-medium leading-none">
-                            推論トークン数
+                            推論回数
                         </p>
                         <p className="text-xs text-muted-foreground">
-                            候補番号を出力するための最大トークン数
+                            変換候補を評価し直す最大回数。2回を推奨（1回は速度優先）
                         </p>
                     </div>
                     <Input className="w-24" type="number" min={1} max={8} value={value.inference_limit} disabled={!value.enable} onChange={handleInferenceLimitChange} />
                 </div>
-                <div className="flex items-center space-x-4 rounded-md border p-4">
-                    <Gauge />
-                    <div className="flex-1 space-y-1">
-                        <p className="text-sm font-medium leading-none">
-                            タイムアウト
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                            Zenzaiの応答を待つ最大時間
-                        </p>
-                    </div>
-                    <Input className="w-28" type="number" min={100} step={100} value={value.timeout_ms} disabled={!value.enable} onChange={handleTimeoutChange} />
-                </div>
-                <div className="flex items-center space-x-4 rounded-md border p-4">
-                    <Gauge />
-                    <div className="flex-1 space-y-1">
-                        <p className="text-sm font-medium leading-none">
-                            Zenzai予測トークン数
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                            追加候補を生成するための最大トークン数
-                        </p>
-                    </div>
-                    <Input className="w-24" type="number" min={4} max={128} value={value.prediction_token_limit} disabled={!value.enable || !value.prediction} onChange={handlePredictionTokenLimitChange} />
-                </div>
+
+
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <Cpu />
                     <div className="flex-1 space-y-1">
@@ -408,7 +339,7 @@ export const Zenzai = () => {
                         </SelectTrigger>
                         <SelectContent className="flex flex-col">
                             <ToolTipSelectItem name="CPU (非推奨)" value="cpu" disabled={!capability.cpu} tooltip="" />
-                            <ToolTipSelectItem name="CUDA (NVIDIA GPU)" value="cuda" disabled={!capability.cuda} tooltip="CUDA Toolkit 12をインストールする必要があります" />
+                            <ToolTipSelectItem name="CUDA (NVIDIA GPU)" value="cuda" disabled={!capability.cuda} tooltip="NVIDIAのGPUと対応ドライバーが必要です" />
                             <ToolTipSelectItem name="Vulkan" value="vulkan" disabled={!capability.vulkan} tooltip="お使いのPCはVulkanに対応していません" />
                         </SelectContent>
                     </Select>
@@ -440,7 +371,7 @@ export const Zenzai = () => {
                             </p>
                         </div>
                     </div>
-                    <Input placeholder="C:\\path\\to\\magic-conversion.exe" value={magicConversion.command_path} disabled={!magicConversion.enable} onChange={handleMagicCommandPathChange} />
+                    <Input placeholder="C:\\path\\to\\magic-conversion.exe" value={magicConversion.command_path} onChange={(event) => setMagicConversion((prev) => ({ ...prev, command_path: event.target.value }))} onBlur={handleMagicCommandPathChange} />
                 </div>
                 <div className="flex items-center space-x-4 rounded-md border p-4">
                     <Gauge />
