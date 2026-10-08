@@ -59,6 +59,7 @@ impl From<shared::proto::ComposingText> for Candidates {
             is_prediction: text.suggestions.iter().map(|s| s.is_prediction).collect(),
             hiragana: text.hiragana,
             raw_input: text.raw_input,
+            clauses: text.suggestions.iter().map(|s| s.clauses.clone()).collect(),
         }
     }
 }
@@ -96,6 +97,7 @@ pub struct Candidates {
     pub corresponding_count: Vec<i32>,
     pub is_prediction: Vec<bool>,
     pub raw_input: String,
+    pub clauses: Vec<Vec<shared::proto::ConversionClause>>,
 }
 
 impl Candidates {
@@ -198,6 +200,11 @@ impl IPCService {
                     .collect(),
                 hiragana: composing_text.hiragana,
                 raw_input: composing_text.raw_input,
+                clauses: composing_text
+                    .suggestions
+                    .iter()
+                    .map(|s| s.clauses.clone())
+                    .collect(),
                 corresponding_count: composing_text
                     .suggestions
                     .iter()
@@ -239,6 +246,11 @@ impl IPCService {
                     .collect(),
                 hiragana: composing_text.hiragana,
                 raw_input: composing_text.raw_input,
+                clauses: composing_text
+                    .suggestions
+                    .iter()
+                    .map(|s| s.clauses.clone())
+                    .collect(),
                 corresponding_count: composing_text
                     .suggestions
                     .iter()
@@ -295,6 +307,11 @@ impl IPCService {
                     .collect(),
                 hiragana: composing_text.hiragana,
                 raw_input: composing_text.raw_input,
+                clauses: composing_text
+                    .suggestions
+                    .iter()
+                    .map(|s| s.clauses.clone())
+                    .collect(),
                 corresponding_count: composing_text
                     .suggestions
                     .iter()
@@ -339,6 +356,43 @@ impl IPCService {
         state.request_id.clear();
         state.result = None;
         Ok(())
+    }
+
+    pub fn convert_clause(
+        &mut self,
+        reading: String,
+        before: &str,
+        prediction: bool,
+    ) -> Result<Candidates> {
+        self.set_candidates(&Candidates::default())?;
+        let context = self
+            .context
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Context mutex poisoned"))?
+            .clone()
+            + before;
+        let count = reading.chars().count() as i32;
+        let request = shared::proto::ConvertTextRequest {
+            reading,
+            raw_input: String::new(),
+            context,
+            prediction_only: prediction,
+        };
+        let mut response = self
+            .runtime
+            .clone()
+            .block_on(self.azookey_client.convert_text(request))?
+            .into_inner()
+            .composing_text
+            .ok_or_else(|| anyhow::anyhow!("Missing clause candidates"))?;
+        response.suggestions.retain(|candidate| {
+            candidate.is_prediction == prediction && candidate.corresponding_count == count
+        });
+        anyhow::ensure!(
+            prediction || !response.suggestions.is_empty(),
+            "No candidates for the complete clause"
+        );
+        Ok(response.into())
     }
 
     pub fn convert_text(&mut self, reading: String, prediction: bool) -> Result<Candidates> {

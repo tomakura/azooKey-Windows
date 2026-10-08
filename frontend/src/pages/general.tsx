@@ -19,6 +19,7 @@ export const General = () => {
         input_style: "default",
         custom_input_table_path: "",
         candidate_number_selection: true,
+        muhenkan_action: "kana_cycle",
         symbol_input_style: "japanese",
         keyboard_layout: "system",
         max_candidates: 16,
@@ -40,6 +41,7 @@ export const General = () => {
                     input_style: data.conversion?.input_style ?? "default",
                     custom_input_table_path: data.conversion?.custom_input_table_path ?? "",
                     candidate_number_selection: data.conversion?.candidate_number_selection ?? true,
+                    muhenkan_action: data.conversion?.muhenkan_action ?? "kana_cycle",
                     symbol_input_style: data.conversion?.symbol_input_style ?? "japanese",
                     keyboard_layout: data.conversion?.keyboard_layout ?? "system",
                     max_candidates: data.conversion?.max_candidates ?? 16,
@@ -147,6 +149,16 @@ export const General = () => {
         });
         if (data) {
             setValue((prev) => ({ ...prev, symbol_input_style }));
+        }
+    };
+
+    const handleMuhenkanActionChange = async (muhenkan_action: string) => {
+        const data = await updateConfig((data) => {
+            data.conversion = data.conversion ?? {};
+            data.conversion.muhenkan_action = muhenkan_action;
+        });
+        if (data) {
+            setValue((prev) => ({ ...prev, muhenkan_action }));
         }
     };
 
@@ -344,6 +356,24 @@ export const General = () => {
                     <Keyboard />
                     <div className="flex-1 space-y-1">
                         <p className="text-sm font-medium leading-none">
+                            無変換キー
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                            入力中の無変換キーの動作を選択します。変換キーは通常変換です
+                        </p>
+                    </div>
+                    <Select value={value.muhenkan_action} onValueChange={handleMuhenkanActionChange}>
+                        <SelectTrigger className="w-52"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="kana_cycle">ひらがな・カタカナ切り替え</SelectItem>
+                            <SelectItem value="latin">英数モードへ切り替え</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="flex items-center space-x-4 rounded-md border p-4">
+                    <Keyboard />
+                    <div className="flex-1 space-y-1">
+                        <p className="text-sm font-medium leading-none">
                             数字キーで候補選択
                         </p>
                         <p className="text-xs text-muted-foreground">
@@ -433,7 +463,7 @@ export const General = () => {
                     <RefreshCcw />
                     <div className="flex-1 space-y-1">
                         <p className="text-sm font-medium leading-none">
-                            v0.1.0-alpha.7
+                            v0.1.0-alpha.8
                         </p>
                     </div>
                     <Button  variant="secondary">

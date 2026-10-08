@@ -10,6 +10,7 @@ pub enum UserAction {
     Enter,
     Space,
     Tab,
+    Muhenkan,
     Escape,
     Unknown,
     Navigation(Navigation),
@@ -45,6 +46,8 @@ impl TryFrom<usize> for UserAction {
             0x09 => UserAction::Tab,       // VK_TAB
             0x0D => UserAction::Enter,     // VK_RETURN
             0x20 => UserAction::Space,     // VK_SPACE
+            0x1C => UserAction::Space,     // VK_CONVERT
+            0x1D => UserAction::Muhenkan,  // VK_NONCONVERT
             0x1B => UserAction::Escape,    // VK_ESCAPE
 
             0x25 => {
@@ -120,6 +123,18 @@ impl TryFrom<usize> for UserAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn jis_conversion_keys_are_recognized() {
+        assert!(matches!(
+            UserAction::try_from(0x1C).unwrap(),
+            UserAction::Space
+        ));
+        assert!(matches!(
+            UserAction::try_from(0x1D).unwrap(),
+            UserAction::Muhenkan
+        ));
+    }
 
     #[test]
     fn hiragana_keys_enable_kana_instead_of_toggling() {

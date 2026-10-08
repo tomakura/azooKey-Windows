@@ -117,6 +117,8 @@ pub struct ConversionConfig {
     pub custom_input_table_path: String,
     #[serde(default = "default_enabled")]
     pub candidate_number_selection: bool,
+    #[serde(default = "default_muhenkan_action")]
+    pub muhenkan_action: String,
     #[serde(default = "default_symbol_input_style")]
     pub symbol_input_style: String,
     #[serde(default = "default_keyboard_layout")]
@@ -135,6 +137,7 @@ impl Default for ConversionConfig {
             input_style: default_input_style(),
             custom_input_table_path: String::new(),
             candidate_number_selection: default_enabled(),
+            muhenkan_action: default_muhenkan_action(),
             symbol_input_style: default_symbol_input_style(),
             keyboard_layout: default_keyboard_layout(),
             max_candidates: default_max_candidates(),
@@ -199,6 +202,10 @@ impl Default for AppConfig {
 
 fn default_version() -> String {
     "0.1.0".to_string()
+}
+
+fn default_muhenkan_action() -> String {
+    "kana_cycle".to_string()
 }
 
 fn default_zenzai_backend() -> String {
@@ -304,6 +311,11 @@ mod tests {
 
     #[test]
     fn config_parse_migrates_missing_fields_with_defaults() {
+        let legacy: ConversionConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(legacy.muhenkan_action, "kana_cycle");
+        let latin: ConversionConfig =
+            serde_json::from_str(r#"{"muhenkan_action":"latin"}"#).unwrap();
+        assert_eq!(latin.muhenkan_action, "latin");
         let config = parse_config_or_default(r#"{"version":"old","conversion":{}}"#);
         assert_eq!(config.version, "old");
         assert!(!config.conversion.live_conversion);

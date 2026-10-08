@@ -13,6 +13,7 @@ pub enum ClientAction {
     SetTextWithType(SetTextType),
 
     MoveCursor(i32),
+    MoveClause(i32),
     ResizeConversion(i32),
     RequestCandidates { prediction: bool },
     SetSelection(SetSelectionType),

@@ -158,6 +158,10 @@ impl TextServiceFactory {
 
     #[tracing::instrument]
     pub fn set_text(&self, text: &str, subtext: &str) -> Result<()> {
+        self.set_clause_text("", text, subtext)
+    }
+
+    pub fn set_clause_text(&self, before: &str, text: &str, subtext: &str) -> Result<()> {
         let text_service = self.borrow()?;
 
         if let Some(composition) = text_service.borrow_composition()?.tip_composition.clone() {
@@ -166,21 +170,37 @@ impl TextServiceFactory {
                 text_service.context()?,
                 Rc::new({
                     let text_len = text.encode_utf16().count() as i32;
+                    let before_len = before.encode_utf16().count() as i32;
 
                     // unpadded is all you need!
-                    let text = format!("{text}{subtext}").as_str().to_wide_16_unpadded();
+                    let text = format!("{before}{text}{subtext}")
+                        .as_str()
+                        .to_wide_16_unpadded();
                     let context = text_service.context::<ITfContext>()?;
                     let display_attribute_atom = text_service.display_attribute_atom.clone();
 
                     move |cookie| unsafe {
                         let range = composition.GetRange()?;
                         range.SetText(cookie, TF_ST_CORRECTION, &text)?;
+                        let prop = context.GetProperty(&GUID_PROP_ATTRIBUTE)?;
+                        prop.Clear(cookie, &range)?;
 
                         // first, set the display attribute to the "text" part
                         let text_range = range.Clone()?;
                         text_range.Collapse(cookie, TF_ANCHOR_START)?;
                         let mut shifted: i32 = 0;
-                        text_range.ShiftEnd(cookie, text_len, &mut shifted, std::ptr::null())?;
+                        text_range.ShiftEnd(
+                            cookie,
+                            before_len + text_len,
+                            &mut shifted,
+                            std::ptr::null(),
+                        )?;
+                        text_range.ShiftStart(
+                            cookie,
+                            before_len,
+                            &mut shifted,
+                            std::ptr::null(),
+                        )?;
                         let display_attribute = display_attribute_atom.get(&GUID_DISPLAY_ATTRIBUTE);
                         if let Some(display_attribute) = display_attribute {
                             let pvar = VARIANT::from(*display_attribute as i32);
@@ -293,13 +313,20 @@ impl TextServiceFactory {
         }
 
         let result: Result<()> = (|| {
-            let (tid, context, tip_composition) = {
+            let (tid, context, tip_composition, clause_range) = {
                 let text_service = self.borrow()?;
                 let composition = text_service.borrow_composition()?;
                 (
                     text_service.tid,
                     text_service.context::<ITfContext>()?,
                     composition.tip_composition.clone(),
+                    composition.clause_session.as_ref().map(|session| {
+                        let (before, active, _) = session.display();
+                        (
+                            before.encode_utf16().count() as i32,
+                            active.encode_utf16().count() as i32,
+                        )
+                    }),
                 )
             };
 
@@ -313,6 +340,18 @@ impl TextServiceFactory {
                         move |cookie| unsafe {
                             let view = context.GetActiveView()?;
                             let range = tip_composition.GetRange()?;
+
+                            if let Some((before, active)) = clause_range {
+                                range.Collapse(cookie, TF_ANCHOR_START)?;
+                                let mut shifted = 0;
+                                range.ShiftEnd(
+                                    cookie,
+                                    before + active,
+                                    &mut shifted,
+                                    std::ptr::null(),
+                                )?;
+                                range.ShiftStart(cookie, before, &mut shifted, std::ptr::null())?;
+                            }
 
                             let Some(mut ipc_service) = IMEState::get()?.ipc_service.clone() else {
                                 return Ok(());

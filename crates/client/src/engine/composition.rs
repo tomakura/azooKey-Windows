@@ -7,6 +7,7 @@ use crate::{
 };
 
 use super::{
+    clauses::ClauseSession,
     client_action::{ClientAction, SetSelectionType, SetTextType},
     full_width::{to_fullwidth, to_halfwidth},
     input_mode::InputMode,
@@ -48,6 +49,7 @@ pub struct Composition {
 
     pub state: CompositionState,
     pub tip_composition: Option<ITfComposition>,
+    pub clause_session: Option<ClauseSession>,
 }
 
 fn normalize_kana_input(text: &str, symbol_input_style: &str) -> String {
@@ -158,6 +160,174 @@ impl ITfCompositionSink_Impl for TextServiceFactory_Impl {
 }
 
 impl TextServiceFactory {
+    fn handle_clause_action(&self, actions: &[ClientAction]) -> Result<bool> {
+        let [action] = actions else {
+            return Ok(false);
+        };
+        let composition = self.borrow()?.borrow_composition()?.clone();
+        let starting = matches!(
+            action,
+            ClientAction::MoveClause(_) | ClientAction::ResizeConversion(_)
+        );
+        let continuing = composition.clause_session.is_some()
+            && matches!(
+                action,
+                ClientAction::SetSelection(_)
+                    | ClientAction::RequestCandidates { .. }
+                    | ClientAction::SetTextWithType(
+                        SetTextType::Hiragana | SetTextType::Katakana | SetTextType::HalfKatakana
+                    )
+            );
+        if !starting && !continuing {
+            return Ok(false);
+        }
+        self.update_context(&composition.preview, &composition.suffix)?;
+        let mut ipc = IMEState::get()?
+            .ipc_service
+            .clone()
+            .context("ipc_service is None")?;
+        let mut candidates = composition.candidates.clone();
+        let mut session = if let Some(session) = composition.clause_session.clone() {
+            session
+        } else {
+            if composition.state == CompositionState::Composing || candidates.texts.is_empty() {
+                candidates = ipc.convert_text(composition.raw_hiragana.clone(), false)?;
+            }
+            if candidates.texts.is_empty() {
+                return Ok(true);
+            }
+            ClauseSession::new(
+                &candidates,
+                (composition.selection_index.max(0) as usize).min(candidates.texts.len() - 1),
+            )?
+        };
+        let mut selection = composition.selection_index.max(0) as usize;
+        let mut query = false;
+        let mut choose_first = false;
+        let mut prediction = false;
+        let mut resized = false;
+        match action {
+            ClientAction::MoveClause(offset) => {
+                session.move_target(*offset);
+                query = true;
+            }
+            ClientAction::ResizeConversion(offset) => {
+                if session.resize(*offset) {
+                    resized = true;
+                    choose_first = true;
+                }
+                query = true;
+            }
+            ClientAction::RequestCandidates {
+                prediction: requested,
+            } => {
+                query = true;
+                choose_first = true;
+                prediction = *requested;
+            }
+            ClientAction::SetSelection(requested) => {
+                if candidates.texts.is_empty() {
+                    query = true;
+                    choose_first = true;
+                } else {
+                    selection = match requested {
+                        SetSelectionType::Up => selection.saturating_sub(1),
+                        SetSelectionType::Down => (selection + 1).min(candidates.texts.len() - 1),
+                        SetSelectionType::Number(index) => (*index).max(0) as usize,
+                    }
+                    .min(candidates.texts.len() - 1);
+                    session.clauses[session.active].text = candidates.texts[selection].clone();
+                }
+            }
+            ClientAction::SetTextWithType(kind) => {
+                let clause = &mut session.clauses[session.active];
+                clause.pending = false;
+                clause.text = match kind {
+                    SetTextType::Hiragana => clause.reading.clone(),
+                    SetTextType::Katakana => to_katakana(&clause.reading),
+                    SetTextType::HalfKatakana => to_half_katakana(&clause.reading),
+                    _ => unreachable!(),
+                };
+                candidates = Candidates::default();
+                selection = 0;
+            }
+            _ => unreachable!(),
+        }
+        if query {
+            let (before, _, _) = session.display();
+            candidates = ipc.convert_clause(
+                session.clauses[session.active].reading.clone(),
+                &before,
+                prediction,
+            )?;
+            if candidates.texts.is_empty() {
+                ipc.set_candidates(&composition.candidates)?;
+                ipc.set_selection(composition.selection_index)?;
+                return Ok(true);
+            }
+            if session.clauses[session.active].pending && !prediction {
+                let expanded = ClauseSession::new(&candidates, 0)?;
+                session
+                    .clauses
+                    .splice(session.active..=session.active, expanded.clauses);
+                candidates = ipc.convert_clause(
+                    session.clauses[session.active].reading.clone(),
+                    &before,
+                    false,
+                )?;
+                choose_first = true;
+            }
+            let current = &session.clauses[session.active].text;
+            selection = if choose_first {
+                0
+            } else {
+                match candidates.texts.iter().position(|text| text == current) {
+                    Some(index) => index,
+                    None => {
+                        candidates.texts.insert(0, current.clone());
+                        candidates.sub_texts.insert(0, String::new());
+                        candidates.corresponding_count.insert(
+                            0,
+                            session.clauses[session.active].reading.chars().count() as i32,
+                        );
+                        candidates.is_prediction.insert(0, false);
+                        candidates.clauses.insert(0, vec![]);
+                        0
+                    }
+                }
+            };
+            session.clauses[session.active].text = candidates.texts[selection].clone();
+        }
+        if resized {
+            if let Some(next) = session.clauses.get(session.active + 1) {
+                let before: String = session.clauses[..=session.active]
+                    .iter()
+                    .map(|clause| clause.text.as_str())
+                    .collect();
+                let next_candidates = ipc.convert_clause(next.reading.clone(), &before, false)?;
+                session.clauses[session.active + 1].text = next_candidates.texts[0].clone();
+                session.clauses[session.active + 1].pending = false;
+            }
+        }
+        ipc.set_candidates(&candidates)?;
+        ipc.set_selection(selection as i32)?;
+        let (before, active, after) = session.display();
+        self.set_clause_text(&before, &active, &after)?;
+        {
+            let service = self.borrow()?;
+            let mut composition = service.borrow_mut_composition()?;
+            composition.preview = format!("{before}{active}{after}");
+            composition.suffix.clear();
+            composition.corresponding_count = composition.raw_hiragana.chars().count() as i32;
+            composition.candidates = candidates;
+            composition.selection_index = selection as i32;
+            composition.state = CompositionState::Previewing;
+            composition.clause_session = Some(session);
+        }
+        self.update_pos()?;
+        Ok(true)
+    }
+
     #[tracing::instrument]
     pub fn process_key(
         &self,
@@ -181,286 +351,12 @@ impl TextServiceFactory {
             (composition, mode)
         };
 
-        let action = UserAction::try_from(wparam.0)?;
-        if let UserAction::SetInputMode(target) = action {
-            // Repeating the Hiragana key must not switch back to Latin or commit the composition.
-            if target == mode {
-                return Ok(Some((vec![], composition.state)));
-            }
-            let mut actions = Vec::new();
-            if composition.state != CompositionState::None {
-                actions.extend([ClientAction::CommitCandidate, ClientAction::EndComposition]);
-            }
-            actions.push(ClientAction::SetIMEMode(target));
-            return Ok(Some((actions, CompositionState::None)));
-        }
-        let conversion_config = shared::AppConfig::read().conversion;
-        let candidate_number_selection = conversion_config.candidate_number_selection;
-
-        let (transition, actions) = match composition.state {
-            CompositionState::None => match action {
-                UserAction::Input(char) if mode == InputMode::Kana => (
-                    CompositionState::Composing,
-                    vec![
-                        ClientAction::StartComposition,
-                        ClientAction::AppendText(char.to_string()),
-                    ],
-                ),
-                UserAction::Number(number) if mode == InputMode::Kana => (
-                    CompositionState::Composing,
-                    vec![
-                        ClientAction::StartComposition,
-                        ClientAction::AppendText(number.to_string()),
-                    ],
-                ),
-                UserAction::ToggleInputMode => (
-                    CompositionState::None,
-                    vec![match mode {
-                        InputMode::Kana => ClientAction::SetIMEMode(InputMode::Latin),
-                        InputMode::Latin => ClientAction::SetIMEMode(InputMode::Kana),
-                    }],
-                ),
-                _ => {
-                    return Ok(None);
-                }
-            },
-            CompositionState::Composing => match action {
-                UserAction::Input(char) => (
-                    CompositionState::Composing,
-                    vec![ClientAction::AppendText(char.to_string())],
-                ),
-                UserAction::Number(number) => (
-                    CompositionState::Composing,
-                    vec![ClientAction::AppendText(number.to_string())],
-                ),
-                UserAction::Backspace => {
-                    if composition.preview.chars().count() == 1 {
-                        (
-                            CompositionState::None,
-                            vec![ClientAction::RemoveText, ClientAction::EndComposition],
-                        )
-                    } else {
-                        (CompositionState::Composing, vec![ClientAction::RemoveText])
-                    }
-                }
-                UserAction::Enter => {
-                    if composition.suffix.is_empty() {
-                        (
-                            CompositionState::None,
-                            vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
-                        )
-                    } else {
-                        (
-                            CompositionState::Composing,
-                            vec![
-                                ClientAction::CommitCandidate,
-                                ClientAction::ShrinkText("".to_string()),
-                            ],
-                        )
-                    }
-                }
-                UserAction::Escape => (
-                    CompositionState::None,
-                    vec![ClientAction::RemoveText, ClientAction::EndComposition],
-                ),
-                UserAction::Navigation(direction) => match direction {
-                    Navigation::Right | Navigation::Left => (
-                        CompositionState::None,
-                        vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
-                    ),
-                    Navigation::Up => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::RequestCandidates { prediction: true }],
-                    ),
-                    Navigation::Down => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::RequestCandidates { prediction: true }],
-                    ),
-                },
-                UserAction::ShiftedNavigation(direction) => match direction {
-                    Navigation::Right => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::ResizeConversion(1)],
-                    ),
-                    Navigation::Left => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::ResizeConversion(-1)],
-                    ),
-                    _ => return Ok(None),
-                },
-                UserAction::ToggleInputMode => (
-                    CompositionState::None,
-                    vec![
-                        ClientAction::EndComposition,
-                        ClientAction::SetIMEMode(InputMode::Latin),
-                    ],
-                ),
-                UserAction::Space | UserAction::Tab => {
-                    let prediction = matches!(action, UserAction::Tab);
-                    (
-                        CompositionState::Previewing,
-                        vec![ClientAction::RequestCandidates { prediction }],
-                    )
-                }
-                UserAction::Function(key) => match key {
-                    Function::Six => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetTextWithType(SetTextType::Hiragana)],
-                    ),
-                    Function::Seven => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetTextWithType(SetTextType::Katakana)],
-                    ),
-                    Function::Eight => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetTextWithType(SetTextType::HalfKatakana)],
-                    ),
-                    Function::Nine => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetTextWithType(SetTextType::FullLatin)],
-                    ),
-                    Function::Ten => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetTextWithType(SetTextType::HalfLatin)],
-                    ),
-                },
-                _ => {
-                    return Ok(None);
-                }
-            },
-            CompositionState::Previewing => match action {
-                UserAction::Input(char) => (
-                    CompositionState::Composing,
-                    vec![
-                        ClientAction::CommitCandidate,
-                        ClientAction::ShrinkText(char.to_string()),
-                    ],
-                ),
-                UserAction::Number(number) if candidate_number_selection => (
-                    CompositionState::Previewing,
-                    vec![ClientAction::SetSelection(SetSelectionType::Number(
-                        candidate_number_to_index(number),
-                    ))],
-                ),
-                UserAction::Number(number) => (
-                    CompositionState::Composing,
-                    vec![
-                        ClientAction::CommitCandidate,
-                        ClientAction::ShrinkText(number.to_string()),
-                    ],
-                ),
-                UserAction::Backspace => {
-                    if composition.preview.chars().count() == 1 {
-                        (
-                            CompositionState::None,
-                            vec![ClientAction::RemoveText, ClientAction::EndComposition],
-                        )
-                    } else {
-                        (CompositionState::Composing, vec![ClientAction::RemoveText])
-                    }
-                }
-                UserAction::Enter => {
-                    if composition.suffix.is_empty() {
-                        (
-                            CompositionState::None,
-                            vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
-                        )
-                    } else {
-                        (
-                            CompositionState::Composing,
-                            vec![
-                                ClientAction::CommitCandidate,
-                                ClientAction::ShrinkText("".to_string()),
-                            ],
-                        )
-                    }
-                }
-                UserAction::Escape => (
-                    CompositionState::None,
-                    vec![ClientAction::RemoveText, ClientAction::EndComposition],
-                ),
-                UserAction::Navigation(direction) => match direction {
-                    Navigation::Right | Navigation::Left => (
-                        CompositionState::None,
-                        vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
-                    ),
-                    Navigation::Up => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetSelection(SetSelectionType::Up)],
-                    ),
-                    Navigation::Down => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetSelection(SetSelectionType::Down)],
-                    ),
-                },
-                UserAction::ShiftedNavigation(direction) => match direction {
-                    Navigation::Right => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::ResizeConversion(1)],
-                    ),
-                    Navigation::Left => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::ResizeConversion(-1)],
-                    ),
-                    _ => return Ok(None),
-                },
-                UserAction::ToggleInputMode => (
-                    CompositionState::None,
-                    vec![
-                        ClientAction::EndComposition,
-                        ClientAction::SetIMEMode(InputMode::Latin),
-                    ],
-                ),
-                UserAction::Space | UserAction::Tab => {
-                    let prediction = matches!(action, UserAction::Tab);
-                    let Some(index) = candidate_for_key(
-                        &composition.candidates,
-                        composition.selection_index,
-                        prediction,
-                        false,
-                    ) else {
-                        return Ok(Some((
-                            vec![ClientAction::RequestCandidates { prediction }],
-                            CompositionState::Previewing,
-                        )));
-                    };
-                    (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetSelection(SetSelectionType::Number(index))],
-                    )
-                }
-                UserAction::Function(key) => match key {
-                    Function::Six => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetTextWithType(SetTextType::Hiragana)],
-                    ),
-                    Function::Seven => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetTextWithType(SetTextType::Katakana)],
-                    ),
-                    Function::Eight => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetTextWithType(SetTextType::HalfKatakana)],
-                    ),
-                    Function::Nine => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetTextWithType(SetTextType::FullLatin)],
-                    ),
-                    Function::Ten => (
-                        CompositionState::Previewing,
-                        vec![ClientAction::SetTextWithType(SetTextType::HalfLatin)],
-                    ),
-                },
-                _ => {
-                    return Ok(None);
-                }
-            },
-            _ => {
-                return Ok(None);
-            }
-        };
-
-        Ok(Some((actions, transition)))
+        key_actions(
+            composition,
+            mode,
+            UserAction::try_from(wparam.0)?,
+            shared::AppConfig::read().conversion,
+        )
     }
 
     #[tracing::instrument]
@@ -486,6 +382,9 @@ impl TextServiceFactory {
         actions: &[ClientAction],
         transition: CompositionState,
     ) -> Result<()> {
+        if self.handle_clause_action(actions)? {
+            return Ok(());
+        }
         #[allow(clippy::let_and_return)]
         let (composition, mode) = {
             let text_service = self.borrow()?;
@@ -616,40 +515,8 @@ impl TextServiceFactory {
                     // TODO: I'll use azookey-kkc's composingText
                     // self.set_cursor(offset)?;
                 }
-                ClientAction::ResizeConversion(offset) => {
-                    let texts = candidates.texts.clone();
-                    if texts.is_empty() {
-                        continue;
-                    }
-                    let current_cc = corresponding_count;
-                    let target_index = if *offset > 0 {
-                        candidates
-                            .corresponding_count
-                            .iter()
-                            .enumerate()
-                            .find(|(_, &cc)| cc > current_cc)
-                            .map(|(i, _)| i as i32)
-                    } else {
-                        candidates
-                            .corresponding_count
-                            .iter()
-                            .enumerate()
-                            .rfind(|(_, &cc)| cc < current_cc)
-                            .map(|(i, _)| i as i32)
-                    };
-                    if let Some(idx) = target_index {
-                        selection_index = idx;
-                        ipc_service.set_selection(selection_index)?;
-                        let text = texts[selection_index as usize].clone();
-                        let sub_text = candidates.sub_texts[selection_index as usize].clone();
-                        let hiragana = candidates.hiragana.clone();
-                        corresponding_count =
-                            candidates.corresponding_count[selection_index as usize];
-                        preview = text.clone();
-                        suffix = sub_text.clone();
-                        raw_hiragana = hiragana.clone();
-                        self.set_text(&text, &sub_text)?;
-                    }
+                ClientAction::MoveClause(_) | ClientAction::ResizeConversion(_) => {
+                    unreachable!("Clause navigation handled above")
                 }
                 ClientAction::SetIMEMode(mode) => {
                     self.start_composition()?;
@@ -785,8 +652,338 @@ impl TextServiceFactory {
         composition.candidates = candidates;
         composition.suffix = suffix.clone();
         composition.corresponding_count = corresponding_count;
+        composition.clause_session = None;
 
         Ok(())
+    }
+}
+
+fn key_actions(
+    composition: Composition,
+    mode: InputMode,
+    mut action: UserAction,
+    conversion_config: shared::ConversionConfig,
+) -> Result<Option<(Vec<ClientAction>, CompositionState)>> {
+    if matches!(action, UserAction::Muhenkan) {
+        if conversion_config.muhenkan_action == "latin" {
+            action = UserAction::SetInputMode(InputMode::Latin);
+        } else if composition.state == CompositionState::None {
+            return Ok(Some((vec![], CompositionState::None)));
+        } else {
+            let (text, reading) = composition
+                .clause_session
+                .as_ref()
+                .map(|session| {
+                    let clause = &session.clauses[session.active];
+                    (clause.text.as_str(), clause.reading.as_str())
+                })
+                .unwrap_or((&composition.preview, &composition.raw_hiragana));
+            let set_type = next_kana_type(text, reading);
+            return Ok(Some((
+                vec![ClientAction::SetTextWithType(set_type)],
+                CompositionState::Previewing,
+            )));
+        }
+    }
+    if let UserAction::SetInputMode(target) = action {
+        // Repeating the Hiragana key must not switch back to Latin or commit the composition.
+        if target == mode {
+            return Ok(Some((vec![], composition.state)));
+        }
+        let mut actions = Vec::new();
+        if composition.state != CompositionState::None {
+            actions.extend([ClientAction::CommitCandidate, ClientAction::EndComposition]);
+        }
+        actions.push(ClientAction::SetIMEMode(target));
+        return Ok(Some((actions, CompositionState::None)));
+    }
+    let candidate_number_selection = conversion_config.candidate_number_selection;
+
+    let (transition, actions) = match composition.state {
+        CompositionState::None => match action {
+            UserAction::Input(char) if mode == InputMode::Kana => (
+                CompositionState::Composing,
+                vec![
+                    ClientAction::StartComposition,
+                    ClientAction::AppendText(char.to_string()),
+                ],
+            ),
+            UserAction::Number(number) if mode == InputMode::Kana => (
+                CompositionState::Composing,
+                vec![
+                    ClientAction::StartComposition,
+                    ClientAction::AppendText(number.to_string()),
+                ],
+            ),
+            UserAction::ToggleInputMode => (
+                CompositionState::None,
+                vec![match mode {
+                    InputMode::Kana => ClientAction::SetIMEMode(InputMode::Latin),
+                    InputMode::Latin => ClientAction::SetIMEMode(InputMode::Kana),
+                }],
+            ),
+            _ => {
+                return Ok(None);
+            }
+        },
+        CompositionState::Composing => match action {
+            UserAction::Input(char) => (
+                CompositionState::Composing,
+                vec![ClientAction::AppendText(char.to_string())],
+            ),
+            UserAction::Number(number) => (
+                CompositionState::Composing,
+                vec![ClientAction::AppendText(number.to_string())],
+            ),
+            UserAction::Backspace => {
+                if composition.preview.chars().count() == 1 {
+                    (
+                        CompositionState::None,
+                        vec![ClientAction::RemoveText, ClientAction::EndComposition],
+                    )
+                } else {
+                    (CompositionState::Composing, vec![ClientAction::RemoveText])
+                }
+            }
+            UserAction::Enter => {
+                if composition.suffix.is_empty() {
+                    (
+                        CompositionState::None,
+                        vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
+                    )
+                } else {
+                    (
+                        CompositionState::Composing,
+                        vec![
+                            ClientAction::CommitCandidate,
+                            ClientAction::ShrinkText("".to_string()),
+                        ],
+                    )
+                }
+            }
+            UserAction::Escape => (
+                CompositionState::None,
+                vec![ClientAction::RemoveText, ClientAction::EndComposition],
+            ),
+            UserAction::Navigation(direction) => match direction {
+                Navigation::Right | Navigation::Left => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::MoveClause(
+                        if matches!(direction, Navigation::Right) {
+                            1
+                        } else {
+                            -1
+                        },
+                    )],
+                ),
+                Navigation::Up => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::RequestCandidates { prediction: true }],
+                ),
+                Navigation::Down => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::RequestCandidates { prediction: true }],
+                ),
+            },
+            UserAction::ShiftedNavigation(direction) => match direction {
+                Navigation::Right => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::ResizeConversion(1)],
+                ),
+                Navigation::Left => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::ResizeConversion(-1)],
+                ),
+                _ => return Ok(None),
+            },
+            UserAction::ToggleInputMode => (
+                CompositionState::None,
+                vec![
+                    ClientAction::EndComposition,
+                    ClientAction::SetIMEMode(InputMode::Latin),
+                ],
+            ),
+            UserAction::Space | UserAction::Tab => {
+                let prediction = matches!(action, UserAction::Tab);
+                (
+                    CompositionState::Previewing,
+                    vec![ClientAction::RequestCandidates { prediction }],
+                )
+            }
+            UserAction::Function(key) => match key {
+                Function::Six => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetTextWithType(SetTextType::Hiragana)],
+                ),
+                Function::Seven => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetTextWithType(SetTextType::Katakana)],
+                ),
+                Function::Eight => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetTextWithType(SetTextType::HalfKatakana)],
+                ),
+                Function::Nine => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetTextWithType(SetTextType::FullLatin)],
+                ),
+                Function::Ten => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetTextWithType(SetTextType::HalfLatin)],
+                ),
+            },
+            _ => {
+                return Ok(None);
+            }
+        },
+        CompositionState::Previewing => match action {
+            UserAction::Input(char) => (
+                CompositionState::Composing,
+                vec![
+                    ClientAction::CommitCandidate,
+                    ClientAction::ShrinkText(char.to_string()),
+                ],
+            ),
+            UserAction::Number(number) if candidate_number_selection => (
+                CompositionState::Previewing,
+                vec![ClientAction::SetSelection(SetSelectionType::Number(
+                    candidate_number_to_index(number),
+                ))],
+            ),
+            UserAction::Number(number) => (
+                CompositionState::Composing,
+                vec![
+                    ClientAction::CommitCandidate,
+                    ClientAction::ShrinkText(number.to_string()),
+                ],
+            ),
+            UserAction::Backspace => {
+                if composition.preview.chars().count() == 1 {
+                    (
+                        CompositionState::None,
+                        vec![ClientAction::RemoveText, ClientAction::EndComposition],
+                    )
+                } else {
+                    (CompositionState::Composing, vec![ClientAction::RemoveText])
+                }
+            }
+            UserAction::Enter => {
+                if composition.suffix.is_empty() {
+                    (
+                        CompositionState::None,
+                        vec![ClientAction::CommitCandidate, ClientAction::EndComposition],
+                    )
+                } else {
+                    (
+                        CompositionState::Composing,
+                        vec![
+                            ClientAction::CommitCandidate,
+                            ClientAction::ShrinkText("".to_string()),
+                        ],
+                    )
+                }
+            }
+            UserAction::Escape => (
+                CompositionState::None,
+                vec![ClientAction::RemoveText, ClientAction::EndComposition],
+            ),
+            UserAction::Navigation(direction) => match direction {
+                Navigation::Right | Navigation::Left => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::MoveClause(
+                        if matches!(direction, Navigation::Right) {
+                            1
+                        } else {
+                            -1
+                        },
+                    )],
+                ),
+                Navigation::Up => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetSelection(SetSelectionType::Up)],
+                ),
+                Navigation::Down => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetSelection(SetSelectionType::Down)],
+                ),
+            },
+            UserAction::ShiftedNavigation(direction) => match direction {
+                Navigation::Right => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::ResizeConversion(1)],
+                ),
+                Navigation::Left => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::ResizeConversion(-1)],
+                ),
+                _ => return Ok(None),
+            },
+            UserAction::ToggleInputMode => (
+                CompositionState::None,
+                vec![
+                    ClientAction::EndComposition,
+                    ClientAction::SetIMEMode(InputMode::Latin),
+                ],
+            ),
+            UserAction::Space | UserAction::Tab => {
+                let prediction = matches!(action, UserAction::Tab);
+                let Some(index) = candidate_for_key(
+                    &composition.candidates,
+                    composition.selection_index,
+                    prediction,
+                    false,
+                ) else {
+                    return Ok(Some((
+                        vec![ClientAction::RequestCandidates { prediction }],
+                        CompositionState::Previewing,
+                    )));
+                };
+                (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetSelection(SetSelectionType::Number(index))],
+                )
+            }
+            UserAction::Function(key) => match key {
+                Function::Six => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetTextWithType(SetTextType::Hiragana)],
+                ),
+                Function::Seven => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetTextWithType(SetTextType::Katakana)],
+                ),
+                Function::Eight => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetTextWithType(SetTextType::HalfKatakana)],
+                ),
+                Function::Nine => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetTextWithType(SetTextType::FullLatin)],
+                ),
+                Function::Ten => (
+                    CompositionState::Previewing,
+                    vec![ClientAction::SetTextWithType(SetTextType::HalfLatin)],
+                ),
+            },
+            _ => {
+                return Ok(None);
+            }
+        },
+        _ => {
+            return Ok(None);
+        }
+    };
+
+    Ok(Some((actions, transition)))
+}
+
+fn next_kana_type(text: &str, reading: &str) -> SetTextType {
+    if text == to_katakana(reading) && text != reading {
+        SetTextType::HalfKatakana
+    } else if text == to_half_katakana(reading) && text != reading {
+        SetTextType::Hiragana
+    } else {
+        SetTextType::Katakana
     }
 }
 
@@ -824,10 +1021,99 @@ fn candidate_number_to_index(number: i8) -> i32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        candidate_for_key, candidate_number_to_index, normalize_kana_input,
-        normalize_keyboard_layout_input, Candidates,
-    };
+    use super::*;
+
+    #[test]
+    fn arrow_keys_never_commit_partial_or_full_conversions() {
+        for state in [CompositionState::Composing, CompositionState::Previewing] {
+            for suffix in ["", "ですね"] {
+                for (action, expected) in [
+                    (
+                        UserAction::Navigation(Navigation::Left),
+                        ClientAction::MoveClause(-1),
+                    ),
+                    (
+                        UserAction::Navigation(Navigation::Right),
+                        ClientAction::MoveClause(1),
+                    ),
+                    (
+                        UserAction::ShiftedNavigation(Navigation::Left),
+                        ClientAction::ResizeConversion(-1),
+                    ),
+                    (
+                        UserAction::ShiftedNavigation(Navigation::Right),
+                        ClientAction::ResizeConversion(1),
+                    ),
+                ] {
+                    let composition = Composition {
+                        state: state.clone(),
+                        preview: "今日は晴れ".into(),
+                        suffix: suffix.into(),
+                        ..Composition::default()
+                    };
+                    let (actions, transition) = key_actions(
+                        composition,
+                        InputMode::Kana,
+                        action,
+                        shared::ConversionConfig::default(),
+                    )
+                    .unwrap()
+                    .unwrap();
+                    assert_eq!(transition, CompositionState::Previewing);
+                    assert_eq!(actions, vec![expected]);
+                    assert!(!actions.contains(&ClientAction::CommitCandidate));
+                    assert!(!actions.contains(&ClientAction::EndComposition));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn muhenkan_cycles_kana_and_can_switch_to_latin() {
+        for (text, expected) in [
+            ("漢字", SetTextType::Katakana),
+            ("カンジ", SetTextType::HalfKatakana),
+            ("ｶﾝｼﾞ", SetTextType::Hiragana),
+        ] {
+            let composition = Composition {
+                state: CompositionState::Previewing,
+                preview: text.into(),
+                raw_hiragana: "かんじ".into(),
+                ..Composition::default()
+            };
+            let (actions, transition) = key_actions(
+                composition,
+                InputMode::Kana,
+                UserAction::Muhenkan,
+                shared::ConversionConfig::default(),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(actions, vec![ClientAction::SetTextWithType(expected)]);
+            assert_eq!(transition, CompositionState::Previewing);
+        }
+        let config = shared::ConversionConfig {
+            muhenkan_action: "latin".into(),
+            ..shared::ConversionConfig::default()
+        };
+        let composition = Composition {
+            state: CompositionState::Previewing,
+            ..Composition::default()
+        };
+        let (actions, transition) =
+            key_actions(composition, InputMode::Kana, UserAction::Muhenkan, config)
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            actions,
+            vec![
+                ClientAction::CommitCandidate,
+                ClientAction::EndComposition,
+                ClientAction::SetIMEMode(InputMode::Latin)
+            ]
+        );
+        assert_eq!(transition, CompositionState::None);
+    }
 
     #[test]
     fn space_and_tab_use_separate_candidate_lists() {
