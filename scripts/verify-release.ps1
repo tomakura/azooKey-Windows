@@ -22,7 +22,7 @@ function Assert-Machine([string]$RelativePath, [uint16]$Expected) {
 }
 foreach ($file in @('azookey-server.exe','azookey_settings.exe','launcher.exe','ui.exe','azookey_windows.dll','azookey-server.dll','llama_cpu/llama.dll','llama_cuda/llama.dll','llama_vulkan/llama.dll')) { Assert-Machine $file 0x8664 }
 Assert-Machine 'x86/azookey_windows.dll' 0x14c
-foreach ($resource in @('Dictionary','EmojiDictionary','swiftCore.dll','zenz.gguf')) {
+foreach ($resource in @('Dictionary','EmojiDictionary','swiftCore.dll','zenz.gguf','licenses/scowl.txt','azookey-server_azookey-server.resources/english-words.txt')) {
     if (!(Test-Path -LiteralPath (Join-Path $package $resource))) { throw "Missing resource: $resource" }
 }
 if (!(Get-ChildItem -LiteralPath $package -Directory -Filter '*.resources')) { throw 'Missing Swift resource bundles' }

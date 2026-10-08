@@ -58,6 +58,9 @@ fn c_string(text: &str) -> Result<CString, String> {
 fn prefer_literal_latin(reading: &str, raw_input: &str) -> bool {
     raw_input.starts_with(|ch: char| ch.is_ascii_uppercase())
         || (reading.ends_with(|ch: char| ch.is_ascii_alphabetic())
+            && !reading
+                .chars()
+                .any(|ch| ('\u{3041}'..='\u{30ff}').contains(&ch))
             && reading
                 .trim_end_matches('n')
                 .chars()
@@ -397,9 +400,9 @@ mod tests {
     #[test]
     fn latin_priority_does_not_replace_complete_romaji_readings() {
         for (reading, raw) in [
-            ("うぃんどws", "windows"),
-            ("せrゔぇr", "server"),
-            ("pろじぇct", "project"),
+            ("windows", "windows"),
+            ("server", "server"),
+            ("project", "project"),
             ("Windows", "Windows"),
         ] {
             assert!(prefer_literal_latin(reading, raw));
@@ -409,6 +412,7 @@ mod tests {
             ("あい", "ai"),
             ("にほn", "nihon"),
             ("うぃんどwsをつかいます", "windowswotsukaimasu"),
+            ("きょうはgithub", "kyouhagithub"),
         ] {
             assert!(!prefer_literal_latin(reading, raw));
         }

@@ -1,5 +1,75 @@
 import Testing
+import KanaKanjiConverterModule
 @testable import azookey_server
+
+@Test func mixedEnglishReading() {
+    for (raw, expected) in [
+        ("windows", "windows"),
+        ("windowswotsukaimasu", "windowsをつかいます"),
+        ("kyouhagoogledekensaku", "きょうはgoogleでけんさく"),
+        ("ashitameetinggaaru", "あしたmeetingがある"),
+        ("pythonnobug", "pythonのbug"),
+        ("kyouhagithub", "きょうはgithub"),
+        ("soshitegithub", "そしてgithub"),
+        ("İgithub", "İgithub"),
+        ("arigatougozaimasu", "ありがとうございます"),
+        ("konnnichiha", "こんにちは"),
+        ("nihongowobenkyoushiteimasu", "にほんごをべんきょうしています"),
+        ("make", "まけ"),
+        ("sushi", "すし"),
+        ("kore", "これ"),
+        ("kanji", "かんじ"),
+        ("kandou", "かんどう"),
+        ("kandannnatesuto", "かんだんなてすと"),
+    ] {
+        var text = ComposingText()
+        var strokes = ""
+        for character in raw {
+            strokes.append(character)
+            MixedInput.update(&text, raw: strokes, style: .roman2kana)
+            #expect(MixedInput.raw(text) == strokes)
+        }
+        #expect(text.convertTarget == expected, "\(raw): \(text.convertTarget)")
+        var snapshot = ComposingText()
+        MixedInput.update(&snapshot, raw: raw, style: .roman2kana)
+        #expect(snapshot.convertTarget == text.convertTarget)
+    }
+    for raw in [
+        "soshite", "hajimemashite", "yoroshikuonegaishimasu", "otsukaresamadesu",
+        "ashitahakaishaniikimasu", "shiryouwokakuninshiteimasu", "kaigiwokaishishimasu",
+        "kinouhakouenniikimashita", "toukyounoshingou", "kantannasetumeidesu",
+        "konngetunoyotei", "shinchokuwokakunin", "seiseki", "watashinoshigoto",
+        "toriaezuyattemimasu", "desukutoppu", "pasokon", "sofutowea", "konnnichiwa",
+    ] {
+        var text = ComposingText()
+        MixedInput.update(&text, raw: raw, style: .roman2kana)
+        #expect(text.convertTarget == MixedInput.romanized(raw, style: .roman2kana).convertTarget, "\(raw): \(text.convertTarget)")
+    }
+    for raw in [
+        String(repeating: "kyouhaiitenkidesu", count: 12),
+        String(repeating: "kyouhaiitenkidesu", count: 3) + "githubwotsukaimasu",
+        String(repeating: "pythonnobugwoshirabemasu", count: 8),
+    ] {
+        var typed = ComposingText()
+        var strokes = ""
+        for character in raw {
+            strokes.append(character)
+            MixedInput.update(&typed, raw: strokes, style: .roman2kana)
+            var snapshot = ComposingText()
+            snapshot.insertAtCursorPosition(MixedInput.elements(strokes, style: .roman2kana))
+            #expect(typed.convertTarget == snapshot.convertTarget, "\(strokes)")
+            #expect(MixedInput.raw(typed) == strokes)
+        }
+    }
+    var text = ComposingText()
+    MixedInput.update(&text, raw: "windowswotsukau", style: .roman2kana)
+    text.prefixComplete(composingCount: .surfaceCount(7))
+    #expect(text.convertTarget == "をつかう")
+    #expect(MixedInput.raw(text) == "wotsukau")
+    text.deleteBackwardFromCursorPosition(count: 1)
+    MixedInput.update(&text, raw: MixedInput.raw(text) + "i", style: .roman2kana)
+    #expect(text.convertTarget == "をつかい")
+}
 
 @Test func dictionaryPartOfSpeechAndRequestOptions() {
     let entries = parseUserDictionary("やまだ\t山田\t人名姓\nとうきょう\t東京\t地名\n")

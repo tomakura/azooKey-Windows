@@ -108,6 +108,72 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             assert_eq!(response.raw_input, prefix);
         }
         checks.push("Windows remains Latin at every keystroke");
+        for (input, expected_reading, expected_text) in [
+            (
+                "windowswotsukaimasu",
+                "windowsをつかいます",
+                "windowsを使います",
+            ),
+            (
+                "kyouhagoogledekensaku",
+                "きょうはgoogleでけんさく",
+                "今日はgoogleで検索",
+            ),
+            (
+                "ashitameetinggaaru",
+                "あしたmeetingがある",
+                "明日meetingがある",
+            ),
+            ("pythonnobug", "pythonのbug", "pythonのbug"),
+            ("kyouhagithub", "きょうはgithub", "今日はgithub"),
+        ] {
+            client
+                .clear_text(ClearTextRequest { preview_only: true })
+                .await?;
+            let composed = client
+                .append_text(AppendTextRequest {
+                    text_to_append: input.into(),
+                    preview_only: true,
+                })
+                .await?
+                .into_inner()
+                .composing_text
+                .unwrap();
+            assert_eq!(composed.hiragana, expected_reading, "{input}");
+            assert_eq!(composed.raw_input, input);
+            assert!(composed.suggestions.is_empty());
+            let result = client
+                .convert_text(ConvertTextRequest {
+                    reading: composed.hiragana,
+                    raw_input: composed.raw_input,
+                    context: String::new(),
+                    prediction_only: false,
+                })
+                .await?
+                .into_inner()
+                .composing_text
+                .unwrap();
+            assert!(
+                result
+                    .suggestions
+                    .iter()
+                    .any(|s| format!("{}{}", s.text, s.subtext) == expected_text),
+                "Missing {expected_text}: {:?}",
+                result.suggestions
+            );
+            let remaining = client
+                .append_text(AppendTextRequest {
+                    text_to_append: String::new(),
+                    preview_only: true,
+                })
+                .await?
+                .into_inner()
+                .composing_text
+                .unwrap();
+            assert_eq!(remaining.hiragana, expected_reading);
+            assert_eq!(remaining.raw_input, input);
+        }
+        checks.push("Mixed English/Japanese readings and conversion candidates preserve Latin spans and raw strokes");
         for input in ["windows", "kanji", "kyou", "kode"] {
             client
                 .clear_text(ClearTextRequest { preview_only: true })

@@ -221,6 +221,9 @@ public func initialize(
     let path = String(cString: path)
     execURL = URL(filePath: path)
     config["runtimeUseZenzai"] = use_zenzai
+    if case .failure(let error) = MixedInput.dictionary {
+        return _strdup("Failed to load English dictionary: \(error)")!
+    }
 
     let error = load_config()
     if error.pointee != 0 { return error }
@@ -257,11 +260,13 @@ public func edit_reading(input: UnsafePointer<CChar>, operation: Int32, count: I
     switch operation {
     case 0:
         let text = String(cString: input)
-        let first = readingText.convertTarget.first ?? text.first
-        let latin = first.map { $0.isASCII && $0.isUppercase } ?? false
-        readingText.insertAtCursorPosition(text, inputStyle: latin ? .direct : inputStyle)
-    case 1: readingText.deleteBackwardFromCursorPosition(count: 1)
-    case 2: readingText.prefixComplete(composingCount: .surfaceCount(Int(count)))
+        MixedInput.update(&readingText, raw: MixedInput.raw(readingText) + text, style: inputStyle)
+    case 1:
+        readingText.deleteBackwardFromCursorPosition(count: 1)
+        MixedInput.update(&readingText, raw: MixedInput.raw(readingText), style: inputStyle)
+    case 2:
+        readingText.prefixComplete(composingCount: .surfaceCount(Int(count)))
+        MixedInput.update(&readingText, raw: MixedInput.raw(readingText), style: inputStyle)
     case 3: readingText = ComposingText()
     default: preconditionFailure("Unknown reading operation")
     }
@@ -367,21 +372,11 @@ public func get_composed_text(lengthPtr: UnsafeMutablePointer<Int32>) -> UnsafeM
 @_silgen_name("GetSnapshotCandidates")
 public func get_snapshot_candidates(input: UnsafePointer<CChar>, rawInput: UnsafePointer<CChar>, predictionOnly: Bool, lengthPtr: UnsafeMutablePointer<Int32>) -> UnsafeMutablePointer<UnsafeMutablePointer<FFICandidate>?> {
     let raw = String(cString: rawInput)
-    let first = raw.first
-    let latin = first.map { $0.isASCII && $0.isUppercase } ?? false
     let next = raw.isEmpty ? String(cString: input) : raw
-    let previous = String(composingText.input.compactMap { element -> Character? in
-        if case .character(let character) = element.piece { return character }
-        return nil
-    })
-    if next.hasPrefix(previous) {
-        composingText.insertAtCursorPosition(String(next.dropFirst(previous.count)),
-            inputStyle: raw.isEmpty || latin ? .direct : inputStyle)
-    } else {
+    if !next.hasPrefix(MixedInput.raw(composingText)) {
         converter?.stopComposition()
-        composingText = ComposingText()
-        composingText.insertAtCursorPosition(next, inputStyle: raw.isEmpty || latin ? .direct : inputStyle)
     }
+    MixedInput.update(&composingText, raw: next, style: raw.isEmpty ? .direct : inputStyle)
     return collect_candidates(lengthPtr: lengthPtr, predictionOnly: predictionOnly, normalOnly: !predictionOnly)
 }
 

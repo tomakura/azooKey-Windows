@@ -41,6 +41,7 @@ Copy-Item -LiteralPath (Join-Path $repo 'zenz.gguf') -Destination $output
 $licenses = Join-Path $output 'licenses'
 New-Item -ItemType Directory -Path $licenses | Out-Null
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSE') -Destination (Join-Path $licenses 'azookey-windows.txt')
+Copy-Item -LiteralPath (Join-Path $repo 'server-swift/Sources/azookey-server/Resources/SCOWL-LICENSE.txt') -Destination (Join-Path $licenses 'scowl.txt')
 Copy-Item -LiteralPath (Join-Path $repo 'server-swift/azooKey_dictionary_storage/LICENSE') -Destination (Join-Path $licenses 'dictionary.txt')
 Copy-Item -LiteralPath (Join-Path $repo 'server-swift/.build/checkouts/AzooKeyKanaKanjiConverter/LICENSE') -Destination (Join-Path $licenses 'converter.txt')
 Get-ChildItem -LiteralPath $output -File -Recurse | ForEach-Object {

@@ -18,7 +18,12 @@ Copy-Item -Path (Join-Path $installed '*.dll') -Destination $engine -Force
 $serverSource = if ($ServerExe) { $ServerExe } else { Join-Path $installed 'azookey-server.exe' }
 Copy-Item -LiteralPath $serverSource -Destination (Join-Path $engine 'azookey-server.exe') -Force
 if ($SwiftDll) { Copy-Item -LiteralPath $SwiftDll -Destination (Join-Path $engine 'azookey-server.dll') -Force }
-foreach ($directory in (Get-ChildItem -LiteralPath $installed -Directory | Where-Object { $_.Name -in @('Dictionary','EmojiDictionary') -or $_.Name -like '*.resources' })) {
+foreach ($directory in (Get-ChildItem -LiteralPath $installed -Directory | Where-Object { $_.Name -in @('Dictionary','EmojiDictionary') })) {
+    $link = Join-Path $engine $directory.Name
+    if (!(Test-Path -LiteralPath $link)) { New-Item -ItemType Junction -Path $link -Target $directory.FullName | Out-Null }
+}
+$resourceRoot = if ($SwiftDll) { Split-Path $SwiftDll -Parent } else { $installed }
+foreach ($directory in (Get-ChildItem -LiteralPath $resourceRoot -Directory -Filter '*.resources')) {
     $link = Join-Path $engine $directory.Name
     if (!(Test-Path -LiteralPath $link)) { New-Item -ItemType Junction -Path $link -Target $directory.FullName | Out-Null }
 }
