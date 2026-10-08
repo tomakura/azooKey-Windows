@@ -21,8 +21,8 @@
 ## 再検証
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/verify-safe.ps1
-powershell -ExecutionPolicy Bypass -File scripts/verify-release.ps1
+pwsh -ExecutionPolicy Bypass -File scripts/verify-safe.ps1
+pwsh -ExecutionPolicy Bypass -File scripts/verify-release.ps1
 cargo build -p azookey-converter --example provider_fixture
 # 実エンジンのテストにはSwiftと選択したllamaバックエンドのDLLがPATHに必要です。
 $env:Path = "$PWD/build/release;$PWD/build/release/llama_cpu;$env:Path"
