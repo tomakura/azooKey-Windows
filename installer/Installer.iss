@@ -1,7 +1,7 @@
 #include "CodeDependencies.iss"
 
 #define MyAppName "Azookey"
-#define MyAppVersion "0.1.0-alpha.5"
+#define MyAppVersion "0.1.0-alpha.6"
 #define MyAppPublisher "fkunn1326"
 #define MyAppURL "https://github.com/fkunn1326/azooKey-Windows/"
 

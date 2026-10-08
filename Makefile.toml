@@ -17,6 +17,10 @@ if ((Test-Path $swiftBin) -and -not (Get-Command swift -ErrorAction SilentlyCont
 }
 Push-Location server-swift
 try {
+    swift package resolve
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & ../scripts/prepare-swift-dependency.ps1
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     swift build -c release
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {

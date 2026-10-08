@@ -43,6 +43,8 @@
 
 バックエンドの変更後は、設定画面の「全般」から「変換エンジンを再起動」を押してください。モデル、辞書、実行ファイルが不足している場合はエラーを表示します。
 
+alpha.6では、WindowsでCUDA/Vulkanを選んでもモデルがCPU側に置かれていた設定を修正し、GPU対応バックエンドで全層をGPUへ配置します。同じモデルと推論回数でSpace変換の待ち時間を短縮します。計測条件と結果は[検証記録](docs/verification.md)を参照してください。
+
 ### 個人最適化
 
 UTF-8のテキストファイルを指定し、個人最適化を有効にすると、内容を変換プロファイルへ追加します。読み込む上限は4,096文字です。Zenzaiを有効にして使用してください。
@@ -99,6 +101,8 @@ cargo install --force cargo-make
 cargo make build --release
 ```
 配布版は`--release`でビルドしてください。CPU、CUDA、Vulkan用のazooKey/llama.cpp b4846 DLLをそれぞれ`llama_cpu`、`llama_cuda`、`llama_vulkan`へ配置し、CPU版の`llama.lib`を`server-swift`へ配置します。`zenz.gguf`もリポジトリ直下へ配置してください。取得元と手順は`.github/workflows/actions.yml`を参照してください。
+
+`cargo make`のSwiftビルドでは、固定した変換器リビジョンへ`server-swift/patches/windows-gpu-layers.patch`を適用します。Swiftを直接ビルドする場合も、`swift package resolve`後に`scripts/prepare-swift-dependency.ps1`を実行してください。パッチの競合や別リビジョンを検出した場合は停止します。
 
 `build/release`に実行ファイル、辞書、モデル、Swiftランタイムとハッシュ一覧が格納され、`build/azookey-setup.exe`が生成されます。`powershell -ExecutionPolicy Bypass -File scripts/verify-safe.ps1`で安全な検証を実行できます。
 

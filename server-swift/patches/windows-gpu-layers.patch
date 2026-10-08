@@ -1,0 +1,15 @@
+diff --git a/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/ZenzContext.swift b/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/ZenzContext.swift
+index 6acd0d3..afd37a6 100644
+--- a/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/ZenzContext.swift
++++ b/Sources/KanaKanjiConverterModule/ConversionAlgorithms/Zenzai/Zenz/ZenzContext.swift
+@@ -59,6 +59,10 @@ final class ZenzContext {
+         llama_backend_init()
+         var model_params = llama_model_default_params()
+         model_params.use_mmap = true
++        #if os(Windows) && !ZenzaiCPU
++        // Windows llama.cpp defaults to zero GPU layers even with CUDA/Vulkan.
++        model_params.n_gpu_layers = llama_supports_gpu_offload() ? Int32.max : 0
++        #endif
+         #if ZenzaiCPU
+         // CPU 専用: GPU へのオフロードを無効化
+         model_params.n_gpu_layers = 0
