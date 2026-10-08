@@ -21,6 +21,7 @@ pub fn spawn_replacement(pending: &mut Option<Child>, mut command: Command) -> i
 mod tests {
     use super::*;
 
+    /// Verify a failed executable launch remains retryable and a successful launch cannot be duplicated.
     #[test]
     fn spawn_failure_can_be_retried_without_a_pending_restart() {
         let missing = std::env::temp_dir()

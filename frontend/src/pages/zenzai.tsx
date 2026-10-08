@@ -47,6 +47,7 @@ const ToolTipSelectItem = ({
     )
 }
 
+/** Configure Zenzai inference, its backend, and optional personalization context. */
 export const Zenzai = () => {
     const [value, setValue] = useState({
         enable: false,

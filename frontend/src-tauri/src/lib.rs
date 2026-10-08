@@ -30,6 +30,7 @@ fn get_config(state: tauri::State<AppState>) -> AppConfig {
     config.clone()
 }
 
+/// Apply saved settings when connected; return false when an offline engine must apply them later.
 fn notify_server_config_update(state: &tauri::State<AppState>) -> Result<bool, String> {
     let mut ipc = state.ipc.lock().map_err(|error| error.to_string())?;
     if ipc.is_none() {
@@ -45,6 +46,7 @@ fn notify_server_config_update(state: &tauri::State<AppState>) -> Result<bool, S
     Ok(false)
 }
 
+/// Persist settings, retaining offline changes and rolling back engine validation errors.
 #[tauri::command]
 fn update_config(state: tauri::State<AppState>, new_config: AppConfig) -> Result<bool, String> {
     let mut config = state.settings.lock().unwrap();
@@ -63,6 +65,7 @@ fn update_config(state: tauri::State<AppState>, new_config: AppConfig) -> Result
     }
 }
 
+/// Recover the engine off the UI thread and replace the stored IPC client after reconnection.
 #[tauri::command]
 async fn restart_engine(state: tauri::State<'_, AppState>) -> Result<(), String> {
     let service = state.ipc.lock().map_err(|error| error.to_string())?.take();

@@ -131,6 +131,7 @@ func constructCandidateString(candidate: Candidate, hiragana _: String) -> Strin
     return candidate.text
 }
 
+/// Reload converter settings and dictionary; return a caller-owned C error string, empty on success.
 @_silgen_name("LoadConfig")
 public func load_config() -> UnsafeMutablePointer<CChar> {
     do {

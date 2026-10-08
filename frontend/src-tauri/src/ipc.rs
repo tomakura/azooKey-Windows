@@ -7,6 +7,7 @@ use tonic::transport::Endpoint;
 use tower::service_fn;
 use windows::Win32::Foundation::ERROR_PIPE_BUSY;
 
+/// Identify transport failures that permit offline settings and a fresh engine connection.
 pub fn is_connection_error(error: &anyhow::Error) -> bool {
     error.downcast_ref::<tonic::transport::Error>().is_some()
         || error.downcast_ref::<tonic::Status>().is_some_and(|status| {
@@ -17,6 +18,7 @@ pub fn is_connection_error(error: &anyhow::Error) -> bool {
         })
 }
 
+/// Restart a running engine or start an offline one, then connect to a new PID within twenty seconds.
 pub fn restart_engine(service: Option<IPCService>, directory: &Path) -> Result<IPCService> {
     let mut service = service.or_else(|| IPCService::new().ok());
     let previous = match service.as_mut().map(|service| service.process_id()) {
@@ -74,6 +76,7 @@ pub struct IPCService {
 }
 
 impl IPCService {
+    /// Connect to the engine pipe with a two-second connection limit and five-second RPC limit.
     pub fn new() -> Result<Self> {
         let runtime = tokio::runtime::Runtime::new()?;
 
@@ -107,6 +110,7 @@ impl IPCService {
 
 // implement methods to interact with kkc server
 impl IPCService {
+    /// Query the connected engine's PID to detect a completed restart.
     pub fn process_id(&mut self) -> anyhow::Result<u32> {
         let response = self.runtime.clone().block_on(
             self.azookey_client
@@ -115,6 +119,7 @@ impl IPCService {
         Ok(response.into_inner().process_id)
     }
 
+    /// Request replacement and return the old PID once the server has accepted the launch.
     pub fn request_restart(&mut self) -> anyhow::Result<u32> {
         let response = self.runtime.clone().block_on(
             self.azookey_client

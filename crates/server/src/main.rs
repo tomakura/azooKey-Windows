@@ -15,6 +15,7 @@ static RESTART_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
 static RESTART: tokio::sync::Notify = tokio::sync::Notify::const_new();
 static SHUTDOWN: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
+/// Prepare the replacement using the saved backend without changing this process's environment.
 fn restart_command() -> Result<std::process::Command, Box<dyn std::error::Error>> {
     let exe = std::env::current_exe()?;
     let directory = exe.parent().ok_or("Server directory is missing")?;
@@ -24,6 +25,7 @@ fn restart_command() -> Result<std::process::Command, Box<dyn std::error::Error>
     )?)
 }
 
+/// Wait up to ten seconds for the supplied parent PID before opening the replacement pipe.
 fn wait_for_previous_process() -> Result<(), Box<dyn std::error::Error>> {
     use windows::Win32::{
         Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0},
@@ -99,6 +101,7 @@ impl AzookeyService for MyAzookeyService {
         }))
     }
 
+    /// Return this process's PID so callers can distinguish it from a replacement.
     async fn engine_status(
         &self,
         _: Request<EngineStatusRequest>,
@@ -108,6 +111,7 @@ impl AzookeyService for MyAzookeyService {
         }))
     }
 
+    /// Spawn one replacement before acknowledging restart; launch failures leave this server running.
     async fn restart_engine(
         &self,
         _: Request<RestartEngineRequest>,
@@ -250,6 +254,7 @@ impl AzookeyService for MyAzookeyService {
     }
 }
 
+/// Initialize the engine and serve RPCs until a successfully spawned replacement requests shutdown.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     wait_for_previous_process()?;

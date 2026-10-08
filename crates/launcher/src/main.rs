@@ -4,6 +4,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::{env, thread};
 
+/// Launch the engine and candidate UI from the installation directory and supervise them.
 fn main() -> anyhow::Result<()> {
     let config = AppConfig::new();
 
@@ -34,12 +35,14 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Start an installed executable with the installation directory as its working directory.
 fn start_process(exe_dir: &Path, exe: &str, prefix: &str) -> anyhow::Result<Child> {
     let mut command = Command::new(exe_dir.join(exe));
     command.current_dir(exe_dir);
     start_command(&mut command, prefix)
 }
 
+/// Spawn a prepared command and forward its stdout and stderr with a component prefix.
 fn start_command(command: &mut Command, prefix: &str) -> anyhow::Result<Child> {
     let exe = command.get_program().to_string_lossy().into_owned();
     let mut child = command

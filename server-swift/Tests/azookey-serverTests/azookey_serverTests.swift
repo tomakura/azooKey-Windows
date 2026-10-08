@@ -3,6 +3,7 @@ import Foundation
 import KanaKanjiConverterModule
 @testable import azookey_server
 
+/// Cover absent and blank paths, bounded UTF-8 input, invalid files, and disabled personalization.
 @Test func personalizationCanBeEnabledBeforeSelectingAFile() throws {
     let enabled: [String: Any] = ["enable": true, "personalization": true]
     #expect(try personalizationText(enabled) == "")

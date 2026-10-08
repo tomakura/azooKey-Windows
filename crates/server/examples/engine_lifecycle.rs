@@ -8,6 +8,7 @@ use std::path::PathBuf;
 struct TestEngine(u32);
 
 impl Drop for TestEngine {
+    /// Stop only the engine PID obtained through this test's isolated named pipe.
     fn drop(&mut self) {
         // Only the PID obtained from this test's isolated pipe is terminated.
         let _ = std::process::Command::new("taskkill")
@@ -16,6 +17,7 @@ impl Drop for TestEngine {
     }
 }
 
+/// Verify blank personalization, repeated restart, backend rejection, and recovery on a real engine.
 fn main() -> anyhow::Result<()> {
     let directory = PathBuf::from(std::env::var_os("AZOOKEY_TEST_RESOURCES").unwrap());
     let appdata = std::env::temp_dir().join(format!("azookey-lifecycle-{}", std::process::id()));
@@ -62,6 +64,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 impl ipc::IPCService {
+    /// Query the real named-pipe service and require a Japanese conversion candidate.
     fn test_conversion(&mut self) -> anyhow::Result<String> {
         // The transport stays private; query via a separate real named-pipe client.
         let runtime = tokio::runtime::Runtime::new()?;

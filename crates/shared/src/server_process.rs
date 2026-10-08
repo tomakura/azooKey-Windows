@@ -40,6 +40,7 @@ pub fn server_command(directory: &Path, backend: &str) -> std::io::Result<Comman
 mod tests {
     use super::*;
 
+    /// Verify backend validation and child-only DLL paths without mutating the parent environment.
     #[test]
     fn recovery_selects_backend_without_changing_parent_environment() {
         let directory = std::env::temp_dir().join(format!("azookey-spawn-{}", std::process::id()));
