@@ -3,6 +3,8 @@ param(
     [string]$Label = 'baseline',
     [string]$SwiftDll,
     [string]$ServerExe,
+    [ValidateRange(1,8)][int]$InferenceLimit = 1,
+    [ValidateSet('inference_latency','conversion_quality')][string]$Benchmark = 'inference_latency',
     [switch]$RequireGpuOffload
 )
 $ErrorActionPreference = 'Stop'
@@ -25,7 +27,7 @@ if (!(Test-Path -LiteralPath $model)) { New-Item -ItemType HardLink -Path $model
 $config = Get-Content -LiteralPath (Join-Path $installed 'settings.json') -Raw | ConvertFrom-Json
 $config.zenzai.enable = $true
 $config.zenzai.backend = $Backend
-$config.zenzai.inference_limit = 1
+$config.zenzai.inference_limit = $InferenceLimit
 $config.zenzai.model_path = ''
 $config.conversion.live_conversion = $false
 $config.learning.enable = $false
@@ -48,7 +50,7 @@ try {
         if ((Get-Content -LiteralPath $log -Raw) -match 'listening') { $ready = $true; break }
     }
     if (!$ready) { throw 'Test server failed to start' }
-    & (Join-Path $repo 'target/debug/examples/inference_latency.exe') > (Join-Path $root 'results.json')
+    & (Join-Path $repo ('target/debug/examples/' + $Benchmark + '.exe')) > (Join-Path $root 'results.json')
     if ($LASTEXITCODE -ne 0) { throw 'Inference benchmark failed' }
     if ($RequireGpuOffload) {
         $errorLog = Get-Content -LiteralPath (Join-Path $root 'server-error.log') -Raw
