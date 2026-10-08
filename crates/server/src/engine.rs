@@ -15,6 +15,7 @@ struct FFICandidate {
     hiragana: *mut c_char,
     corresponding_count: c_int,
     is_prediction: c_int,
+    clauses: *mut c_char,
 }
 
 unsafe extern "C" {
@@ -256,6 +257,10 @@ impl Engine {
                         .into_owned(),
                     corresponding_count: candidate.corresponding_count,
                     is_prediction: candidate.is_prediction != 0,
+                    clauses: serde_json::from_str(
+                        &CStr::from_ptr(candidate.clauses).to_string_lossy(),
+                    )
+                    .map_err(|error| error.to_string())?,
                 });
             }
             FreeCandidates(pointer, count);
@@ -300,6 +305,7 @@ impl Engine {
                         subtext: String::new(),
                         corresponding_count: reading.chars().count() as i32,
                         is_prediction: false,
+                        clauses: vec![],
                     });
                 let index = if prefer_latin {
                     registered_count
@@ -317,6 +323,7 @@ impl Engine {
                     subtext: candidate.subtext,
                     corresponding_count: candidate.corresponding_count,
                     is_prediction: false,
+                    clauses: vec![],
                 })
                 .collect::<Vec<_>>()
         } else {
@@ -337,6 +344,7 @@ impl Engine {
                     subtext: candidate.subtext,
                     corresponding_count: candidate.corresponding_count,
                     is_prediction: false,
+                    clauses: vec![],
                 }),
             );
         }
@@ -345,6 +353,7 @@ impl Engine {
             subtext: String::new(),
             corresponding_count: reading.chars().count() as i32,
             is_prediction: false,
+            clauses: vec![],
         });
         let mut seen = HashSet::new();
         suggestions.retain(|candidate| {
@@ -425,6 +434,35 @@ mod tests {
             .map(PathBuf::from)
             .unwrap_or_else(|| root.join("server-swift/azooKey_dictionary_storage"));
         let mut engine = Engine::new(&resources).unwrap();
+        let sentence = engine
+            .convert(
+                "きょうはいいてんきですね".into(),
+                "kyouhaiitenkidesune",
+                "",
+                false,
+            )
+            .unwrap();
+        let candidate = &sentence.suggestions[0];
+        assert!(
+            candidate.clauses.len() > 1,
+            "Missing phrase boundaries: {candidate:?}"
+        );
+        assert_eq!(
+            candidate
+                .clauses
+                .iter()
+                .map(|clause| clause.text.as_str())
+                .collect::<String>(),
+            candidate.text
+        );
+        assert_eq!(
+            candidate
+                .clauses
+                .iter()
+                .map(|clause| clause.corresponding_count)
+                .sum::<i32>(),
+            candidate.corresponding_count
+        );
         let today = engine.convert("きょう".into(), "kyou", "", false).unwrap();
         assert_eq!(today.suggestions[0].text, "今日");
         let dates = azookey_converter::dynamic_candidates("きょう");

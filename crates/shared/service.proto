@@ -2,11 +2,17 @@ syntax = "proto3";
 
 package azookey;
 
+message ConversionClause {
+  string text = 1;
+  int32 corresponding_count = 2;
+}
+
 message Suggestion {
   string text = 1;    // The main suggestion text.
   string subtext = 2; // Additional information or subtext for the suggestion.
   int32 corresponding_count = 3;
   bool is_prediction = 4;
+  repeated ConversionClause clauses = 5;
 }
 
 // ComposingText represents the text and its associated suggestions.

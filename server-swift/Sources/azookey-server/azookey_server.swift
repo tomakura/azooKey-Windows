@@ -340,6 +340,7 @@ public func free_candidates(_ pointer: UnsafeMutablePointer<UnsafeMutablePointer
             free(item.pointee.text)
             free(item.pointee.subtext)
             free(item.pointee.hiragana)
+            free(item.pointee.clauses)
             item.deinitialize(count: 1)
             item.deallocate()
         }
@@ -423,13 +424,33 @@ func collect_candidates(lengthPtr: UnsafeMutablePointer<Int32>, predictionOnly: 
         let hiragana = _strdup(hiragana)
         let subtext = _strdup(afterComposingText.convertTarget)
 
-        result.append(FFICandidate(text: text, subtext: subtext, hiragana: hiragana, correspondingCount: Int32(correspondingCount), isPrediction: isPrediction ? 1 : 0))
+        let clauses = candidateClauses(candidate, count: correspondingCount)
+        result.append(FFICandidate(text: text, subtext: subtext, hiragana: hiragana, correspondingCount: Int32(correspondingCount), isPrediction: isPrediction ? 1 : 0, clauses: _strdup(clauses)))
         if result.count >= limit { break }
     }
 
     lengthPtr.pointee = Int32(result.count)
 
     return to_list_pointer(result)
+}
+
+func candidateClauses(_ candidate: Candidate, count: Int) -> String {
+    let display = constructCandidateString(candidate: candidate, hiragana: composingText.convertTarget)
+    var remaining = candidate.data[...]
+    var clauses: [[String: Any]] = []
+    while !remaining.isEmpty {
+        let clause = Candidate.makePrefixClauseCandidate(data: remaining)
+        guard !clause.data.isEmpty else { break }
+        clauses.append(["text": clause.text, "corresponding_count": clause.data.reduce(0) { $0 + $1.ruby.count }])
+        remaining = remaining.dropFirst(clause.data.count)
+    }
+    // Templates and non-dictionary candidates form a single indivisible clause.
+    if clauses.compactMap({ $0["text"] as? String }).joined() != display
+        || clauses.compactMap({ $0["corresponding_count"] as? Int }).reduce(0, +) != count {
+        clauses = [["text": display, "corresponding_count": count]]
+    }
+    let data = try! JSONSerialization.data(withJSONObject: clauses)
+    return String(decoding: data, as: UTF8.self)
 }
 
 @_silgen_name("ShrinkText")

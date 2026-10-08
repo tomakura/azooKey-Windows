@@ -169,6 +169,96 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         checks.push("Space returns normal candidates including typed English");
         checks.push("Tab returns predictions only");
         checks.push("Concurrent predictions never add candidates to typing responses");
+        client
+            .clear_text(ClearTextRequest { preview_only: true })
+            .await?;
+        let original = client
+            .append_text(AppendTextRequest {
+                text_to_append: "kyouhaiitenkidesune".into(),
+                preview_only: true,
+            })
+            .await?
+            .into_inner()
+            .composing_text
+            .unwrap();
+        let converted = client
+            .convert_text(ConvertTextRequest {
+                reading: original.hiragana.clone(),
+                raw_input: original.raw_input.clone(),
+                context: String::new(),
+                prediction_only: false,
+            })
+            .await?
+            .into_inner()
+            .composing_text
+            .unwrap();
+        let selected = &converted.suggestions[0];
+        assert!(
+            selected.clauses.len() > 1,
+            "Missing clause boundaries: {selected:?}"
+        );
+        let chars: Vec<_> = original.hiragana.chars().collect();
+        let mut offset = 0;
+        let mut context = String::new();
+        for clause in &selected.clauses {
+            let end = offset + clause.corresponding_count as usize;
+            let reading: String = chars[offset..end].iter().collect();
+            let candidates = client
+                .convert_text(ConvertTextRequest {
+                    reading,
+                    raw_input: String::new(),
+                    context: context.clone(),
+                    prediction_only: false,
+                })
+                .await?
+                .into_inner()
+                .composing_text
+                .unwrap();
+            assert!(candidates
+                .suggestions
+                .iter()
+                .any(|candidate| !candidate.is_prediction
+                    && candidate.corresponding_count == clause.corresponding_count
+                    && candidate.subtext.is_empty()));
+            context.push_str(&clause.text);
+            offset = end;
+        }
+        for count in [
+            selected.clauses[0].corresponding_count - 1,
+            selected.clauses[0].corresponding_count + 1,
+        ] {
+            if count <= 0 || count as usize > chars.len() {
+                continue;
+            }
+            let candidates = client
+                .convert_text(ConvertTextRequest {
+                    reading: chars[..count as usize].iter().collect(),
+                    raw_input: String::new(),
+                    context: String::new(),
+                    prediction_only: false,
+                })
+                .await?
+                .into_inner()
+                .composing_text
+                .unwrap();
+            assert!(candidates
+                .suggestions
+                .iter()
+                .any(|candidate| candidate.corresponding_count == count
+                    && candidate.subtext.is_empty()));
+        }
+        let unchanged = client
+            .append_text(AppendTextRequest {
+                text_to_append: String::new(),
+                preview_only: true,
+            })
+            .await?
+            .into_inner()
+            .composing_text
+            .unwrap();
+        assert_eq!(unchanged.hiragana, original.hiragana);
+        assert_eq!(unchanged.raw_input, original.raw_input);
+        checks.push("Clause queries and resized ranges preserve the complete uncommitted reading");
     }
     client
         .clear_text(ClearTextRequest {

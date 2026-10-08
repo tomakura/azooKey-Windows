@@ -11,4 +11,5 @@ struct FFICandidate {
     char *hiragana;
     int correspondingCount;
     int isPrediction;
+    char *clauses;
 };
