@@ -33,9 +33,9 @@ Name: "japanese"; MessagesFile: "compiler:Languages\Japanese.isl"
 ; Task scheduler XML — extracted to temp dir only, not installed
 Source: "./Azookey Startup.xml"; Flags: dontcopy noencryption
 ; Register 64-bit IME DLL (also handles DllUnregisterServer on uninstall)
-Source: "../build/release/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey.dll"; Flags: ignoreversion regserver 64bit
+Source: "../build/release/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey-{#MyAppVersion}.dll"; Flags: ignoreversion regserver uninsrestartdelete 64bit
 ; Register 32-bit IME DLL
-Source: "../build/release/x86/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey32.dll"; Flags: ignoreversion regserver 32bit
+Source: "../build/release/x86/azookey_windows.dll"; DestDir: "{app}"; DestName: "azookey32-{#MyAppVersion}.dll"; Flags: ignoreversion regserver uninsrestartdelete 32bit
 ; All other build artifacts (exes, dictionaries, etc.) — excludes the raw DLLs already handled above
 Source: "../build/release/*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "azookey_windows.dll,x86\azookey_windows.dll"
 
@@ -45,10 +45,10 @@ Name: "{userprograms}\Azookey\Azookey 設定"; Filename: "{app}\azookey_settings
 [Run]
 ; Grant AppContainer (sandbox) read/execute on the IME DLLs — required for TSF to load the DLL
 Filename: "icacls"; \
-  Parameters: """{app}\azookey.dll"" /grant ""*S-1-15-2-1:(RX)"""; \
+  Parameters: """{app}\azookey-{#MyAppVersion}.dll"" /grant ""*S-1-15-2-1:(RX)"""; \
   Flags: runhidden runascurrentuser
 Filename: "icacls"; \
-  Parameters: """{app}\azookey32.dll"" /grant ""*S-1-15-2-1:(RX)"""; \
+  Parameters: """{app}\azookey32-{#MyAppVersion}.dll"" /grant ""*S-1-15-2-1:(RX)"""; \
   Flags: runhidden runascurrentuser
 
 [UninstallRun]

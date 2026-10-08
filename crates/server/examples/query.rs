@@ -6,16 +6,19 @@ use tokio::net::windows::named_pipe::ClientOptions;
 use tonic::transport::Endpoint;
 use tower::service_fn;
 
-// Verification client deliberately requires an isolated instance.
+// Mutating queries require an isolated instance; --status only reads process identity.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    if std::env::var("AZOOKEY_INSTANCE")
-        .unwrap_or_default()
-        .is_empty()
+    let text = std::env::args()
+        .nth(1)
+        .ok_or("Provide input text or --status")?;
+    if text != "--status"
+        && std::env::var("AZOOKEY_INSTANCE")
+            .unwrap_or_default()
+            .is_empty()
     {
         return Err("Set AZOOKEY_INSTANCE to a test instance before querying".into());
     }
-    let text = std::env::args().nth(1).ok_or("Provide input text")?;
     let channel = Endpoint::try_from("http://localhost")?
         .connect_with_connector(service_fn(|_| async {
             ClientOptions::new()
@@ -24,6 +27,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }))
         .await?;
     let mut client = AzookeyServiceClient::new(channel);
+    if text == "--status" {
+        let response = client
+            .engine_status(shared::proto::EngineStatusRequest {})
+            .await?;
+        println!("{}", response.into_inner().process_id);
+        return Ok(());
+    }
     client.clear_text(ClearTextRequest {}).await?;
     let response = client
         .append_text(AppendTextRequest {
