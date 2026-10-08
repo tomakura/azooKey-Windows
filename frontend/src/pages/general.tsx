@@ -433,7 +433,7 @@ export const General = () => {
                     <RefreshCcw />
                     <div className="flex-1 space-y-1">
                         <p className="text-sm font-medium leading-none">
-                            v0.1.0-alpha.6
+                            v0.1.0-alpha.7
                         </p>
                     </div>
                     <Button  variant="secondary">

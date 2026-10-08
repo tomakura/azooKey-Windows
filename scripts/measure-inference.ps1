@@ -4,7 +4,7 @@ param(
     [string]$SwiftDll,
     [string]$ServerExe,
     [ValidateRange(1,8)][int]$InferenceLimit = 1,
-    [ValidateSet('inference_latency','conversion_quality')][string]$Benchmark = 'inference_latency',
+    [ValidateSet('inference_latency','conversion_quality','input_latency')][string]$Benchmark = 'inference_latency',
     [switch]$RequireGpuOffload
 )
 $ErrorActionPreference = 'Stop'
@@ -32,6 +32,10 @@ $config.zenzai.model_path = ''
 $config.conversion.live_conversion = $false
 $config.learning.enable = $false
 $config | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath (Join-Path $profile 'Azookey/settings.json') -Encoding utf8
+if ($Benchmark -eq 'input_latency') {
+    [IO.File]::WriteAllText((Join-Path $profile 'Azookey/user_dictionary.tsv'),
+        "こでっくす`t検証専用語`t固有名詞`n", [Text.UTF8Encoding]::new($false))
+}
 $originalAppdata = $env:APPDATA
 $originalPath = $env:PATH
 $originalInstance = $env:AZOOKEY_INSTANCE
