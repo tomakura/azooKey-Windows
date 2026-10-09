@@ -29,6 +29,11 @@ impl WindowController {
         Self { sender }
     }
 
+    /// Forward an RPC action to the window loop and report a closed loop as unavailable.
+    #[allow(
+        clippy::result_large_err,
+        reason = "Preserve tonic's RPC error type at the service boundary"
+    )]
     async fn send(&self, action: WindowAction) -> Result<(), Status> {
         self.sender
             .send(action)
