@@ -99,12 +99,16 @@ jobs:
       run: |
         cd frontend
         npm ci
+        npm run build
+
+    - name: Check Rust before packaging
+      run: cargo clippy --workspace --all-targets -- -D warnings
 
     - name: Build
       run: cargo make build --release
 
     - name: Verify
-      run: pwsh -ExecutionPolicy Bypass -File scripts/verify-safe.ps1
+      run: pwsh -ExecutionPolicy Bypass -File scripts/verify-safe.ps1 -SkipClippy
 
     - name: Verify release package and real CPU converter
       shell: pwsh
