@@ -41,11 +41,13 @@ fn engine_process_is_alive(pid: u32) -> Result<bool> {
         Err(error) => return Err(error.into()),
     };
     let state = unsafe { WaitForSingleObject(handle, 0) };
+    let wait_error =
+        (state != WAIT_TIMEOUT && state != WAIT_OBJECT_0).then(windows::core::Error::from_win32);
     unsafe { CloseHandle(handle)? };
     match state {
         WAIT_TIMEOUT => Ok(true),
         WAIT_OBJECT_0 => Ok(false),
-        _ => Err(windows::core::Error::from_win32().into()),
+        _ => Err(wait_error.unwrap().into()),
     }
 }
 

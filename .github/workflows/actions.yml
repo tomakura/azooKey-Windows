@@ -183,8 +183,15 @@ jobs:
           exit 0
         }
         if ($matching.Count -gt 0) {
-          # Resolve annotated tags to their commit as well as lightweight tags.
-          $tagCommit = & gh api "repos/$env:GITHUB_REPOSITORY/commits/$tag" --jq '.sha' 2>&1
+          # A draft created with --target may not have a Git tag until publication.
+          $tagRefs = & gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq '.[].ref' 2>&1
+          if ($LASTEXITCODE -ne 0) { throw ($tagRefs -join "`n") }
+          if ($tagRefs -contains "refs/tags/$tag") {
+            # Resolve annotated tags to their commit as well as lightweight tags.
+            $tagCommit = & gh api "repos/$env:GITHUB_REPOSITORY/commits/$tag" --jq '.sha' 2>&1
+          } else {
+            $tagCommit = & gh release view $tag --json targetCommitish --jq '.targetCommitish' 2>&1
+          }
           if ($LASTEXITCODE -ne 0) { throw ($tagCommit -join "`n") }
           if (($tagCommit -join "`n").Trim() -ne $env:GITHUB_SHA) {
             throw 'Draft tag and verified installer refer to different commits; refusing to replace assets'

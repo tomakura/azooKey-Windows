@@ -79,6 +79,11 @@ pub struct MyAzookeyService;
 
 #[tonic::async_trait]
 impl AzookeyService for MyAzookeyService {
+    /// Run conversion off the RPC executor while retaining the service's Status errors.
+    #[allow(
+        clippy::result_large_err,
+        reason = "Preserve tonic's RPC error type across the blocking conversion task"
+    )]
     async fn convert_text(
         &self,
         request: Request<ConvertTextRequest>,
