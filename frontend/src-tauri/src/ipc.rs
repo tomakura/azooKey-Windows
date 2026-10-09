@@ -284,7 +284,7 @@ mod tests {
         }
     }
 
-    /// An expired RPC on a live engine must neither report the old PID as a restart nor orphan a child.
+    /// A failed RPC on a live engine must neither report the old PID as a restart nor orphan a child.
     #[test]
     #[ignore = "requires the staged Windows engine and CPU model"]
     fn restart_recovers_from_a_transient_rpc_failure() {
@@ -303,28 +303,24 @@ mod tests {
         let mut service = restart_engine(None, &directory).unwrap();
         let previous = service.process_id().unwrap();
         let mut engine = TestEngine(previous);
-        let channel = service
-            .runtime
-            .block_on(
-                Endpoint::from_static("http://localhost")
-                    .connect_timeout(Duration::from_secs(2))
-                    .timeout(Duration::ZERO)
-                    .connect_with_connector(service_fn(|_| async {
-                        let client = loop {
-                            match ClientOptions::new().open(shared::pipe_path("azookey_server")) {
-                                Ok(client) => break client,
-                                Err(error)
-                                    if error.raw_os_error() == Some(ERROR_PIPE_BUSY.0 as i32) => {}
-                                Err(error) => return Err(error),
-                            }
-                            time::sleep(Duration::from_millis(50)).await;
-                        };
-                        Ok::<_, std::io::Error>(TokioIo::new(client))
-                    })),
-            )
-            .unwrap();
+        // A zero-duration timeout races a ready response. Fail only this client's
+        // connector deterministically while leaving the real engine available.
+        let channel = service.runtime.block_on(async {
+            Endpoint::from_static("http://localhost")
+                .connect_timeout(Duration::from_secs(2))
+                .timeout(Duration::from_secs(5))
+                .connect_with_connector_lazy(service_fn(|_| async {
+                    Err::<TokioIo<tokio::net::windows::named_pipe::NamedPipeClient>, _>(
+                        std::io::Error::new(
+                            std::io::ErrorKind::ConnectionReset,
+                            "injected transient connection failure",
+                        ),
+                    )
+                }))
+        });
         service.azookey_client = AzookeyServiceClient::new(channel);
-        assert!(service.process_id().is_err());
+        let error = service.process_id().unwrap_err();
+        assert!(is_connection_error(&error));
         assert_eq!(service.last_process_id, previous);
         let mut service = restart_engine(Some(service), &directory).unwrap();
         engine.0 = service.process_id().unwrap();
