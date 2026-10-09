@@ -182,20 +182,24 @@ jobs:
           Write-Host "$tag already exists; keeping the published release"
           exit 0
         }
-        if ($matching.Count -gt 0) {
-          # A draft created with --target may not have a Git tag until publication.
-          $tagRefs = & gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq '.[].ref' 2>&1
-          if ($LASTEXITCODE -ne 0) { throw ($tagRefs -join "`n") }
-          if ($tagRefs -contains "refs/tags/$tag") {
+        # Verify an existing tag before either creating a release or replacing draft assets.
+        $tagRefs = & gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq '.[].ref' 2>&1
+        if ($LASTEXITCODE -ne 0) { throw ($tagRefs -join "`n") }
+        $hasTag = $tagRefs -contains "refs/tags/$tag"
+        if ($hasTag -or $matching.Count -gt 0) {
+          if ($hasTag) {
             # Resolve annotated tags to their commit as well as lightweight tags.
             $tagCommit = & gh api "repos/$env:GITHUB_REPOSITORY/commits/$tag" --jq '.sha' 2>&1
           } else {
+            # A draft created with --target may not have a Git tag until publication.
             $tagCommit = & gh release view $tag --json targetCommitish --jq '.targetCommitish' 2>&1
           }
           if ($LASTEXITCODE -ne 0) { throw ($tagCommit -join "`n") }
           if (($tagCommit -join "`n").Trim() -ne $env:GITHUB_SHA) {
-            throw 'Draft tag and verified installer refer to different commits; refusing to replace assets'
+            throw 'Release target and verified installer refer to different commits; refusing publication'
           }
+        }
+        if ($matching.Count -gt 0) {
           # A previous upload may have stopped halfway; repair both assets before publishing.
           gh release upload $tag release-assets/azookey-setup.exe release-assets/azookey-setup.exe.sha256 --clobber
         } else {
