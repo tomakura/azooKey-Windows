@@ -3,6 +3,8 @@ use std::path::PathBuf;
 
 pub mod server_process;
 
+// Tonic's generated API requires its unboxed Status return type.
+#[allow(clippy::result_large_err)]
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/azookey.rs"));
     include!(concat!(env!("OUT_DIR"), "/window.rs"));
