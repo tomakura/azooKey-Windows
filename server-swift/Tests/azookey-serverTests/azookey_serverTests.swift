@@ -18,6 +18,14 @@ import KanaKanjiConverterModule
     #expect(try personalizationText(["enable": false, "personalization": true, "personalization_path": url.path + ".missing"]) == "")
 }
 
+/// CRLF, LF, and CR resources must produce the same English words and exclude comments.
+@Test func englishDictionaryAcceptsWindowsLineEndings() {
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = ["# SCOWL", "windows", "meeting", "", "ab", "python"].joined(separator: newline)
+        #expect(MixedInput.parseWords(source) == ["windows", "meeting", "python"])
+    }
+}
+
 @Test func mixedEnglishReading() {
     for (raw, expected) in [
         ("windows", "windows"),
