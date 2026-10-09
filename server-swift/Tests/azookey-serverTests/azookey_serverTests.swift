@@ -1,6 +1,30 @@
 import Testing
+import Foundation
 import KanaKanjiConverterModule
 @testable import azookey_server
+
+/// Cover absent and blank paths, bounded UTF-8 input, invalid files, and disabled personalization.
+@Test func personalizationCanBeEnabledBeforeSelectingAFile() throws {
+    let enabled: [String: Any] = ["enable": true, "personalization": true]
+    #expect(try personalizationText(enabled) == "")
+    #expect(try personalizationText(enabled.merging(["personalization_path": "  \n"]) { _, new in new }) == "")
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".txt")
+    try String(repeating: "猫", count: 5000).write(to: url, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: url) }
+    #expect(try personalizationText(enabled.merging(["personalization_path": url.path]) { _, new in new }) == String(repeating: "猫", count: 4096))
+    #expect(throws: (any Error).self) {
+        try personalizationText(enabled.merging(["personalization_path": url.path + ".missing"]) { _, new in new })
+    }
+    #expect(try personalizationText(["enable": false, "personalization": true, "personalization_path": url.path + ".missing"]) == "")
+}
+
+/// CRLF, LF, and CR resources must produce the same English words and exclude comments.
+@Test func englishDictionaryAcceptsWindowsLineEndings() {
+    for newline in ["\n", "\r\n", "\r"] {
+        let source = ["# SCOWL", "windows", "meeting", "", "ab", "python"].joined(separator: newline)
+        #expect(MixedInput.parseWords(source) == ["windows", "meeting", "python"])
+    }
+}
 
 @Test func mixedEnglishReading() {
     for (raw, expected) in [

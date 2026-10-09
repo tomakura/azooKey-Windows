@@ -47,6 +47,7 @@ const ToolTipSelectItem = ({
     )
 }
 
+/** Configure Zenzai inference, its backend, and optional personalization context. */
 export const Zenzai = () => {
     const [value, setValue] = useState({
         enable: false,
@@ -288,7 +289,7 @@ export const Zenzai = () => {
                                 パーソナライズファイル
                             </p>
                             <p className="text-xs text-muted-foreground">
-                                最大4096文字を変換文脈として読み込みます
+                                UTF-8のファイルから最大4096文字を読み込みます。空欄の場合は追加しません
                             </p>
                         </div>
                     </div>

@@ -10,8 +10,7 @@ enum MixedInput {
     }
     static let dictionary: Result<[Node], Error> = Result {
         let url = Bundle.module.bundleURL.appendingPathComponent("english-words.txt")
-        let words = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
-            .filter { !$0.hasPrefix("#") && $0.count >= 3 }.map(String.init)
+        let words = parseWords(try String(contentsOf: url, encoding: .utf8))
         var nodes = [Node()]
         for word in words + products.sorted() {
             var node = 0
@@ -29,6 +28,11 @@ enum MixedInput {
             nodes[node].product = products.contains(word)
         }
         return nodes
+    }
+    /// Accept both LF and Windows CRLF without adding newline characters to dictionary words.
+    static func parseWords(_ text: String) -> [String] {
+        text.split(whereSeparator: \.isNewline)
+            .filter { !$0.hasPrefix("#") && $0.count >= 3 }.map(String.init)
     }
     // Product names absent from a general spelling dictionary. Written independently.
     static let products: Set<String> = [

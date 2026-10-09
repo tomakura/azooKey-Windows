@@ -1,5 +1,6 @@
 use std::{env, path::PathBuf};
 
+/// Generate the RPC bindings and reflection descriptors from the shared protocol files.
 fn main() {
     if env::var_os("PROTOC").is_none() {
         let protoc =
@@ -19,7 +20,7 @@ fn main() {
                 format!("{}/service.proto", project_dir),
                 format!("{}/window.proto", project_dir),
             ],
-            &[project_dir.to_string()],
+            std::slice::from_ref(&project_dir),
         )
         .unwrap();
 }

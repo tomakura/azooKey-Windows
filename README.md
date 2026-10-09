@@ -93,6 +93,7 @@ UTF-8のテキストファイルを指定し、個人最適化を有効にする
 ### 開発環境のセットアップ
 
 - [Rust](https://www.rust-lang.org/tools/install)
+- [PowerShell 7](https://github.com/PowerShell/PowerShell/releases) (`pwsh`をPATHへ追加)
 - [Swift for Windows](https://www.swift.org/install/windows/) (Swift 6.3.2で検証)
 - [protoc](https://protobuf.dev/installation/) 
 - [node.js](https://nodejs.org/en/download/)
@@ -119,7 +120,7 @@ cargo make build --release
 
 `cargo make`のSwiftビルドでは、固定した変換器リビジョンへ`server-swift/patches/windows-gpu-layers.patch`を適用します。Swiftを直接ビルドする場合も、`swift package resolve`後に`scripts/prepare-swift-dependency.ps1`を実行してください。パッチの競合や別リビジョンを検出した場合は停止します。
 
-`build/release`に実行ファイル、辞書、モデル、Swiftランタイムとハッシュ一覧が格納され、`build/azookey-setup.exe`が生成されます。`powershell -ExecutionPolicy Bypass -File scripts/verify-safe.ps1`で安全な検証を実行できます。
+`build/release`に実行ファイル、辞書、モデル、Swiftランタイムとハッシュ一覧が格納され、`build/azookey-setup.exe`が生成されます。`pwsh -ExecutionPolicy Bypass -File scripts/verify-safe.ps1`で安全な検証を実行できます。
 
 `launcher.exe`を管理者権限で実行すると、azookeyの変換エンジンが起動します。
 

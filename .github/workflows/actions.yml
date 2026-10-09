@@ -1,5 +1,12 @@
 name: Rust
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 on:
   push:
   pull_request:
@@ -10,23 +17,35 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       with:
         submodules: recursive
+        persist-credentials: false
 
     - name: Cache Rust
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+      with:
+        cache-on-failure: true
+
+    - name: Restore Swift build cache
+      id: swift-cache
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: server-swift/.build
+        key: ${{ runner.os }}-swift-6.3.2-${{ hashFiles('server-swift/Package.swift', 'server-swift/Package.resolved', 'server-swift/patches/*.patch') }}
 
     - name: Install Swift
-      uses: compnerd/gha-setup-swift@main
+      uses: compnerd/gha-setup-swift@bbae8ce86bac5a3449f3992b3d88bc4ca25f2057 # main
       with:
         swift-version: swift-6.3.2-release
         swift-build: 6.3.2-RELEASE
 
     - name: Install Protoc
-      uses: arduino/setup-protoc@v3
+      uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
+      with:
+        repo-token: ${{ github.token }}
 
-    - uses: actions/setup-node@v4
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       with:
         node-version: 22
 
@@ -37,7 +56,11 @@ jobs:
       run: choco install innosetup --yes --no-progress
 
     - name: Install cargo-make
-      run: cargo install --force cargo-make
+      run: |
+        if (!(Get-Command cargo-make -ErrorAction SilentlyContinue)) {
+          cargo install --locked cargo-make
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        }
 
     - name: Download prebuilt llama
       run: |
@@ -76,17 +99,21 @@ jobs:
       run: |
         cd frontend
         npm ci
+        npm run build
+
+    - name: Check Rust before packaging
+      run: cargo clippy --workspace --all-targets -- -D warnings
 
     - name: Build
       run: cargo make build --release
 
     - name: Verify
-      run: powershell -ExecutionPolicy Bypass -File scripts/verify-safe.ps1
+      run: pwsh -ExecutionPolicy Bypass -File scripts/verify-safe.ps1 -SkipClippy
 
     - name: Verify release package and real CPU converter
       shell: pwsh
       run: |
-        powershell -ExecutionPolicy Bypass -File scripts/verify-release.ps1
+        pwsh -ExecutionPolicy Bypass -File scripts/verify-release.ps1
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         cargo build -p azookey-converter --example provider_fixture
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -95,10 +122,89 @@ jobs:
         $env:AZOOKEY_TEST_ZENZAI = '1'
         cargo test -p azookey-server --bin azookey-server -- --nocapture
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Push-Location server-swift
+        try {
+          swift test -c release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        } finally { Pop-Location }
+        cargo test -p azookey-server --example engine_lifecycle -- --include-ignored --nocapture
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        cargo run -p azookey-server --example engine_lifecycle
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        $hash = (Get-FileHash build/azookey-setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$hash  azookey-setup.exe" | Set-Content build/azookey-setup.exe.sha256 -Encoding ascii
 
     - name: Upload Setup Artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
         name: azookey-setup
-        path: build/azookey-setup.exe
+        path: |
+          build/azookey-setup.exe
+          build/azookey-setup.exe.sha256
         if-no-files-found: error
+
+    - name: Save Swift build cache
+      if: always() && !cancelled() && steps.swift-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: server-swift/.build
+        key: ${{ steps.swift-cache.outputs.cache-primary-key }}
+
+  release-alpha10:
+    name: Publish alpha.10
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    permissions:
+      contents: write # Create the prerelease and upload its verified installer assets.
+    steps:
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      with:
+        persist-credentials: false
+    - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      with:
+        name: azookey-setup
+        path: release-assets
+    - name: Publish verified alpha.10
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $tag = 'v0.1.0-alpha.10'
+        if (!(Select-String -LiteralPath installer/Installer.iss -SimpleMatch '#define MyAppVersion "0.1.0-alpha.10"')) {
+          throw 'Installer version does not match the requested release'
+        }
+        $existing = & gh release list --limit 100 --json tagName,isDraft 2>&1
+        if ($LASTEXITCODE -ne 0) { throw ($existing -join "`n") }
+        $matching = @((($existing -join "`n") | ConvertFrom-Json) | Where-Object { $_.tagName -eq $tag })
+        if ($matching.Count -gt 0 -and !$matching[0].isDraft) {
+          Write-Host "$tag already exists; keeping the published release"
+          exit 0
+        }
+        # Verify an existing tag before either creating a release or replacing draft assets.
+        $tagRefs = & gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq '.[].ref' 2>&1
+        if ($LASTEXITCODE -ne 0) { throw ($tagRefs -join "`n") }
+        $hasTag = $tagRefs -contains "refs/tags/$tag"
+        if ($hasTag -or $matching.Count -gt 0) {
+          if ($hasTag) {
+            # Resolve annotated tags to their commit as well as lightweight tags.
+            $tagCommit = & gh api "repos/$env:GITHUB_REPOSITORY/commits/$tag" --jq '.sha' 2>&1
+          } else {
+            # A draft created with --target may not have a Git tag until publication.
+            $tagCommit = & gh release view $tag --json targetCommitish --jq '.targetCommitish' 2>&1
+          }
+          if ($LASTEXITCODE -ne 0) { throw ($tagCommit -join "`n") }
+          if (($tagCommit -join "`n").Trim() -ne $env:GITHUB_SHA) {
+            throw 'Release target and verified installer refer to different commits; refusing publication'
+          }
+        }
+        if ($matching.Count -gt 0) {
+          # A previous upload may have stopped halfway; repair both assets before publishing.
+          gh release upload $tag release-assets/azookey-setup.exe release-assets/azookey-setup.exe.sha256 --clobber
+        } else {
+          gh release create $tag release-assets/azookey-setup.exe release-assets/azookey-setup.exe.sha256 --target $env:GITHUB_SHA --title $tag --notes-file docs/releases/alpha10.md --prerelease --draft
+        }
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        gh release edit $tag --draft=false
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

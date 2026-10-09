@@ -4,6 +4,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::{env, thread};
 
+/// Launch the engine and candidate UI from the installation directory and supervise them.
 fn main() -> anyhow::Result<()> {
     let config = AppConfig::new();
 
@@ -11,24 +12,9 @@ fn main() -> anyhow::Result<()> {
         .parent()
         .ok_or_else(|| anyhow::anyhow!("Failed to resolve launcher directory"))?
         .to_path_buf();
-    let backend_dir = match config.zenzai.backend.as_str() {
-        "cpu" => "llama_cpu",
-        "cuda" => "llama_cuda",
-        "vulkan" => "llama_vulkan",
-        backend => anyhow::bail!("Unknown Zenzai backend: {backend}"),
-    };
-
-    let backend_path = exe_path.join(backend_dir);
-    if !backend_path.join("llama.dll").is_file() {
-        anyhow::bail!("Missing Zenzai backend: {}", backend_path.display());
-    }
-    let backend_path_str = backend_path.to_string_lossy();
-
-    let mut new_path = env::var("PATH").unwrap_or_else(|_| String::new());
-    new_path = format!("{};{}", backend_path_str, new_path);
-    env::set_var("PATH", &new_path);
-
-    let mut server_process = start_process(&exe_path, "azookey-server.exe", "[server]")?;
+    let mut server_command =
+        shared::server_process::server_command(&exe_path, &config.zenzai.backend)?;
+    let mut server_process = start_command(&mut server_command, "[server]")?;
     let ui_process = match start_process(&exe_path, "ui.exe", "[ui]") {
         Ok(process) => process,
         Err(error) => {
@@ -49,13 +35,21 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Start an installed executable with the installation directory as its working directory.
 fn start_process(exe_dir: &Path, exe: &str, prefix: &str) -> anyhow::Result<Child> {
-    let exe_path = exe_dir.join(exe);
-    let mut child = Command::new(&exe_path)
+    let mut command = Command::new(exe_dir.join(exe));
+    command.current_dir(exe_dir);
+    start_command(&mut command, prefix)
+}
+
+/// Spawn a prepared command and forward its stdout and stderr with a component prefix.
+fn start_command(command: &mut Command, prefix: &str) -> anyhow::Result<Child> {
+    let exe = command.get_program().to_string_lossy().into_owned();
+    let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| anyhow::anyhow!("Failed to start {}: {}", exe_path.display(), error))?;
+        .map_err(|error| anyhow::anyhow!("Failed to start {}: {}", exe, error))?;
 
     let stdout = child
         .stdout

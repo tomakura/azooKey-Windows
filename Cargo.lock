@@ -322,6 +322,7 @@ dependencies = [
 name = "azookey-server"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "async-stream",
  "azookey-converter",
  "futures-core",

@@ -1,4 +1,5 @@
 mod engine;
+mod restart;
 
 use azookey_server::TonicNamedPipeServer;
 use engine::Engine;
@@ -10,28 +11,45 @@ use tonic_reflection::server::Builder as ReflectionBuilder;
 
 static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
 static READING: Mutex<()> = Mutex::new(());
+static RESTART_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
 static RESTART: tokio::sync::Notify = tokio::sync::Notify::const_new();
+static SHUTDOWN: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
+/// Prepare the replacement using the saved backend without changing this process's environment.
 fn restart_command() -> Result<std::process::Command, Box<dyn std::error::Error>> {
     let exe = std::env::current_exe()?;
     let directory = exe.parent().ok_or("Server directory is missing")?;
-    let backend = match shared::AppConfig::read().zenzai.backend.as_str() {
-        "cpu" => "llama_cpu",
-        "cuda" => "llama_cuda",
-        "vulkan" => "llama_vulkan",
-        _ => return Err("Unknown Zenzai backend".into()),
+    Ok(shared::server_process::server_command(
+        directory,
+        &shared::AppConfig::read().zenzai.backend,
+    )?)
+}
+
+/// Wait up to ten seconds for the supplied parent PID before opening the replacement pipe.
+fn wait_for_previous_process() -> Result<(), Box<dyn std::error::Error>> {
+    use windows::Win32::{
+        Foundation::{CloseHandle, ERROR_INVALID_PARAMETER, WAIT_OBJECT_0},
+        System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE},
     };
-    let backend = directory.join(backend);
-    if !backend.join("llama.dll").is_file() {
-        return Err(format!("Missing Zenzai backend: {}", backend.display()).into());
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() != Some("--wait-for-process") {
+        return Ok(());
     }
-    let mut paths = vec![backend];
-    paths.extend(std::env::split_paths(
-        &std::env::var_os("PATH").unwrap_or_default(),
-    ));
-    let mut command = std::process::Command::new(&exe);
-    command.env("PATH", std::env::join_paths(paths)?);
-    Ok(command)
+    let pid = args
+        .next()
+        .ok_or("Previous process ID is missing")?
+        .parse()?;
+    let handle = match unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) } {
+        Ok(handle) => handle,
+        Err(error) if error.code() == ERROR_INVALID_PARAMETER.to_hresult() => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let result = unsafe { WaitForSingleObject(handle, 10_000) };
+    unsafe { CloseHandle(handle)? };
+    if result != WAIT_OBJECT_0 {
+        return Err("Previous engine did not exit within 10 seconds".into());
+    }
+    Ok(())
 }
 
 #[allow(
@@ -61,6 +79,11 @@ pub struct MyAzookeyService;
 
 #[tonic::async_trait]
 impl AzookeyService for MyAzookeyService {
+    /// Run conversion off the RPC executor while retaining the service's Status errors.
+    #[allow(
+        clippy::result_large_err,
+        reason = "Preserve tonic's RPC error type across the blocking conversion task"
+    )]
     async fn convert_text(
         &self,
         request: Request<ConvertTextRequest>,
@@ -83,6 +106,7 @@ impl AzookeyService for MyAzookeyService {
         }))
     }
 
+    /// Return this process's PID so callers can distinguish it from a replacement.
     async fn engine_status(
         &self,
         _: Request<EngineStatusRequest>,
@@ -92,11 +116,29 @@ impl AzookeyService for MyAzookeyService {
         }))
     }
 
+    /// Spawn one replacement before acknowledging restart; launch failures leave this server running.
     async fn restart_engine(
         &self,
         _: Request<RestartEngineRequest>,
     ) -> Result<Response<EngineStatusResponse>, Status> {
-        restart_command().map_err(|error| Status::failed_precondition(error.to_string()))?;
+        use std::os::windows::process::CommandExt;
+        let mut pending = RESTART_CHILD
+            .lock()
+            .map_err(|_| Status::internal("Restart mutex poisoned"))?;
+        let mut command =
+            restart_command().map_err(|error| Status::failed_precondition(error.to_string()))?;
+        command
+            .args(["--wait-for-process", &std::process::id().to_string()])
+            .creation_flags(0x08000000);
+        let pid = restart::spawn_replacement(&mut pending, command).map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                Status::already_exists(error.to_string())
+            } else {
+                Status::internal(format!("Failed to start replacement engine: {error}"))
+            }
+        })?;
+        println!("AzookeyServer replacement started: {pid}");
+        // Only a successful spawn may shut down the old server. The child waits for our exit.
         RESTART.notify_one();
         Ok(Response::new(EngineStatusResponse {
             process_id: std::process::id(),
@@ -217,8 +259,10 @@ impl AzookeyService for MyAzookeyService {
     }
 }
 
+/// Initialize the engine and serve RPCs until a successfully spawned replacement requests shutdown.
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    wait_for_previous_process()?;
     println!("AzookeyServer started");
     let current_exe = std::env::current_exe()?;
     let parent_dir = current_exe
@@ -227,21 +271,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = Engine::new(parent_dir).map_err(std::io::Error::other)?;
     *ENGINE.lock().map_err(|_| "Engine mutex poisoned")? = Some(engine);
     println!("AzookeyServer listening");
-    Server::builder()
-        .add_service(AzookeyServiceServer::new(MyAzookeyService))
-        .add_service(
-            ReflectionBuilder::configure()
-                .register_encoded_file_descriptor_set(shared::proto::FILE_DESCRIPTOR_SET)
-                .build_v1()?,
-        )
-        .serve_with_incoming_shutdown(
-            TonicNamedPipeServer::new("azookey_server"),
-            RESTART.notified(),
-        )
-        .await?;
-    // All requests and named-pipe listeners are closed before the replacement starts.
-    use std::os::windows::process::CommandExt;
-    let child = restart_command()?.creation_flags(0x08000000).spawn()?;
-    println!("AzookeyServer restarted: {}", child.id());
-    Ok(())
+    let mut server = tokio::spawn(
+        Server::builder()
+            .add_service(AzookeyServiceServer::new(MyAzookeyService))
+            .add_service(
+                ReflectionBuilder::configure()
+                    .register_encoded_file_descriptor_set(shared::proto::FILE_DESCRIPTOR_SET)
+                    .build_v1()?,
+            )
+            .serve_with_incoming_shutdown(
+                TonicNamedPipeServer::new("azookey_server"),
+                SHUTDOWN.notified(),
+            ),
+    );
+    tokio::select! {
+        result = &mut server => {
+            result??;
+            return Ok(());
+        }
+        _ = RESTART.notified() => {}
+    }
+    // Let the restart RPC finish, but do not let persistent IPC clients block shutdown.
+    SHUTDOWN.notify_one();
+    if let Ok(result) = tokio::time::timeout(std::time::Duration::from_secs(3), &mut server).await {
+        result??;
+    }
+    // Close every old named-pipe handle before the child initializes its listener.
+    std::process::exit(0)
 }

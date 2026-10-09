@@ -1,6 +1,7 @@
 param(
     [switch]$SkipFrontendBuild,
-    [switch]$SkipX86
+    [switch]$SkipX86,
+    [switch]$SkipClippy
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,7 +17,9 @@ Push-Location $repo
 try {
     Invoke-Checked cargo @('fmt', '--', '--check')
     Invoke-Checked cargo @('test', '-p', 'shared', '-p', 'azookey-converter', '-p', 'azookey-windows', '--lib')
-    Invoke-Checked cargo @('clippy', '--workspace', '--all-targets', '--', '-D', 'warnings')
+    if (-not $SkipClippy) {
+        Invoke-Checked cargo @('clippy', '--workspace', '--all-targets', '--', '-D', 'warnings')
+    }
     Invoke-Checked cargo @('check', '--workspace')
     Invoke-Checked cargo @('check', '-p', 'azookey-windows', '--target', 'x86_64-pc-windows-msvc')
 
@@ -45,7 +48,7 @@ try {
         }
     }
 
-    Invoke-Checked powershell @('-ExecutionPolicy', 'Bypass', '-File', (Join-Path $repo 'scripts/verify-installer-static.ps1'))
+    Invoke-Checked pwsh @('-ExecutionPolicy', 'Bypass', '-File', (Join-Path $repo 'scripts/verify-installer-static.ps1'))
     Invoke-Checked git @('diff', '--check')
 } finally {
     Pop-Location

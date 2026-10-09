@@ -131,6 +131,7 @@ func constructCandidateString(candidate: Candidate, hiragana _: String) -> Strin
     return candidate.text
 }
 
+/// Reload converter settings and dictionary; return a caller-owned C error string, empty on success.
 @_silgen_name("LoadConfig")
 public func load_config() -> UnsafeMutablePointer<CChar> {
     do {
@@ -150,12 +151,7 @@ public func load_config() -> UnsafeMutablePointer<CChar> {
         for key in ["prediction", "typo_correction", "dynamic_candidates", "max_candidates", "live_conversion"] {
             next[key] = conversion[key]
         }
-        next["personalizationText"] = ""
-        if ((zenzai["enable"] as? Bool) ?? false) && ((zenzai["personalization"] as? Bool) ?? false) {
-            let path = (zenzai["personalization_path"] as? String) ?? ""
-            let text = try String(contentsOf: URL(filePath: path), encoding: .utf8)
-            next["personalizationText"] = String(text.prefix(4096))
-        }
+        next["personalizationText"] = try personalizationText(zenzai)
         let style = (conversion["input_style"] as? String) ?? "default"
         var nextStyle: InputStyle = .roman2kana
         if style == "azik" {
@@ -184,6 +180,16 @@ public func load_config() -> UnsafeMutablePointer<CChar> {
     } catch {
         return _strdup("Failed to load configuration: \(error)")!
     }
+}
+
+/// Read up to 4096 UTF-8 characters when personalization is enabled and a path is supplied.
+func personalizationText(_ zenzai: [String: Any]) throws -> String {
+    guard (zenzai["enable"] as? Bool) ?? false,
+          (zenzai["personalization"] as? Bool) ?? false else { return "" }
+    let path = (zenzai["personalization_path"] as? String) ?? ""
+    // Enabling the switch before selecting a file must never read the working directory.
+    guard !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "" }
+    return String(try String(contentsOf: URL(filePath: path), encoding: .utf8).prefix(4096))
 }
 
 func toKatakana(_ text: String) -> String {

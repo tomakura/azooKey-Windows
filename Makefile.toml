@@ -8,7 +8,7 @@ args = ["fmt"]
 
 [tasks.build_swift]
 description = "Build the swift converter"
-script_runner = "powershell"
+script_runner = "pwsh"
 script_extension = "ps1"
 script = """
 $swiftBin = Join-Path $env:LOCALAPPDATA "Programs\\Swift\\Toolchains\\6.3.2+Asserts\\usr\\bin"
@@ -38,16 +38,16 @@ args = ["build", "-p", "azookey-windows", "--target=i686-pc-windows-msvc", "${@}
 
 [tasks.build_tauri]
 description = "Build the settings UI"
-script_runner = "powershell"
+script_runner = "pwsh"
 script_extension = "ps1"
 script = """
 $npmCli = "C:\\Program Files\\nodejs\\node_modules\\npm\\bin\\npm-cli.js"
 Push-Location frontend
 try {
     if (Test-Path $npmCli) {
-        node $npmCli run tauri build
+        node $npmCli run tauri build -- --no-bundle
     } else {
-        npm run tauri build
+        npm run tauri build -- --no-bundle
     }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
@@ -56,21 +56,23 @@ try {
 """
 
 [tasks.build_installer]
-script_runner = "powershell"
+script_runner = "pwsh"
 script_extension = "ps1"
 script = """
 $compiler = Get-Command iscc -ErrorAction SilentlyContinue
 if ($compiler) {
     & $compiler.Source installer/Installer.iss
 } else {
-    & "C:\\Program Files\\Inno Setup 7\\ISCC.exe" installer/Installer.iss
+    $compilerPath = @("C:\\Program Files\\Inno Setup 7\\ISCC.exe", "C:\\Program Files (x86)\\Inno Setup 7\\ISCC.exe", "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe", "C:\\Program Files\\Inno Setup 6\\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (!$compilerPath) { throw "Inno Setup compiler was not found" }
+    & $compilerPath installer/Installer.iss
 }
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 """
 
 [tasks.post_build]
 description = "Stage a fresh package including the Swift runtime and resources"
-script_runner = "powershell"
+script_runner = "pwsh"
 script_extension = "ps1"
 script = """
 $str = $args[0]
@@ -81,7 +83,7 @@ args = ["${@}"]
 
 [tasks.grant_appcontainer_permissions]
 description = "Grant AppContainer read and execute permissions to built IME DLLs"
-script_runner = "powershell"
+script_runner = "pwsh"
 script_extension = "ps1"
 script = """
 icacls build/release/azookey_windows.dll /grant "*S-1-15-2-1:(RX)"
@@ -90,7 +92,7 @@ icacls build/release/x86/azookey_windows.dll /grant "*S-1-15-2-1:(RX)"
 
 [tasks.dev_reload]
 description = "Hot-reload Azookey without system restart (run dev-reload.ps1)"
-script_runner = "powershell"
+script_runner = "pwsh"
 script_extension = "ps1"
 script = """
 & (Join-Path $env:CARGO_MAKE_WORKING_DIRECTORY "dev-reload.ps1")
