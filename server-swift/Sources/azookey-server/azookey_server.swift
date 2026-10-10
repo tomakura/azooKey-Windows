@@ -10,6 +10,10 @@ nonisolated(unsafe) var readingText = ComposingText()
 nonisolated(unsafe) var lastCandidates: [Candidate] = []
 nonisolated(unsafe) var inputStyle: InputStyle = .roman2kana
 nonisolated(unsafe) var userEntries: [DicdataElement] = []
+// Resolved once per configuration load instead of touching the file system on every request.
+nonisolated(unsafe) var memoryURL = URL(filePath: "")
+nonisolated(unsafe) var userDictionaryURL = URL(filePath: "")
+nonisolated(unsafe) var emojiURL = URL(filePath: "")
 
 nonisolated(unsafe) var execURL = URL(filePath: "")
 nonisolated(unsafe) var config: [String : Any] = [
@@ -89,7 +93,7 @@ func zenzaiMode(context: String) -> ConvertRequestOptions.ZenzaiMode {
 }
 
 func getOptions(context: String = "", predictionOnly: Bool = false) -> ConvertRequestOptions {
-    let emojiURL = emojiDictionaryURL()
+    let emojiURL = emojiURL
     return ConvertRequestOptions(
         N_best: max(1, min(32, (config["max_candidates"] as? Int) ?? 16)),
         requireJapanesePrediction: ((config["prediction"] as? Bool) ?? true) ? .manualMix : .disabled,
@@ -98,8 +102,8 @@ func getOptions(context: String = "", predictionOnly: Bool = false) -> ConvertRe
         englishCandidateInRoman2KanaInput: true,
         fullWidthRomanCandidate: true,
         learningType: ((config["learning"] as? Bool) ?? true) ? .inputAndOutput : .nothing,
-        memoryDirectoryURL: memoryDirectoryURL(),
-        sharedContainerURL: userDictionaryDirectoryURL(),
+        memoryDirectoryURL: memoryURL,
+        sharedContainerURL: userDictionaryURL,
         textReplacer: .init(emojiDataProvider: { emojiURL }),
         specialCandidateProviders: ((config["dynamic_candidates"] as? Bool) ?? true)
             ? KanaKanjiConverter.defaultSpecialCandidateProviders : [],
@@ -172,6 +176,9 @@ public func load_config() -> UnsafeMutablePointer<CChar> {
             ? try parseUserDictionary(String(contentsOf: dictionaryURL, encoding: .utf8)) : []
         config = next
         inputStyle = nextStyle
+        memoryURL = memoryDirectoryURL()
+        userDictionaryURL = userDictionaryDirectoryURL()
+        emojiURL = emojiDictionaryURL()
         composingText = ComposingText()
         converter?.stopComposition()
         userEntries = entries
@@ -333,7 +340,12 @@ public func commit_candidate(reading: UnsafePointer<CChar>, text: UnsafePointer<
         data: [DicdataElement(word: word, ruby: ruby, cid: CIDData.一般名詞.cid, mid: MIDData.一般.mid, value: -5)])
     converter.setCompletedData(candidate)
     converter.updateLearningData(candidate)
-    converter.commitUpdateLearningData()
+}
+
+/// Persist learning in one batch; the Rust server calls this after commits settle.
+@_silgen_name("SaveLearning")
+public func save_learning() {
+    converter?.commitUpdateLearningData()
 }
 
 @_silgen_name("FreeText")
