@@ -289,6 +289,24 @@ impl AppConfig {
         parse_config_or_default(&config_str)
     }
 
+    /// Keystroke paths call this: it re-reads the file only when its timestamp or size changes.
+    pub fn read_cached() -> Self {
+        type Stamp = Option<(std::time::SystemTime, u64)>;
+        static CACHE: std::sync::Mutex<Option<(Stamp, AppConfig)>> = std::sync::Mutex::new(None);
+        let stamp = std::fs::metadata(get_config_root().join(SETTINGS_FILENAME))
+            .ok()
+            .and_then(|metadata| Some((metadata.modified().ok()?, metadata.len())));
+        let mut cache = CACHE.lock().unwrap_or_else(|error| error.into_inner());
+        match cache.as_ref() {
+            Some((cached, config)) if *cached == stamp => config.clone(),
+            _ => {
+                let config = AppConfig::read();
+                *cache = Some((stamp, config.clone()));
+                config
+            }
+        }
+    }
+
     pub fn new() -> Self {
         let config_path = get_config_root();
         let _ = std::fs::create_dir_all(&config_path);
@@ -305,6 +323,21 @@ fn parse_config_or_default(config_str: &str) -> AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_config_follows_file_changes() {
+        let root = std::env::temp_dir().join(format!("azookey-cache-{}", std::process::id()));
+        std::env::set_var("APPDATA", &root);
+        std::fs::create_dir_all(root.join("Azookey")).unwrap();
+        let settings = root.join("Azookey").join(SETTINGS_FILENAME);
+        std::fs::write(&settings, r#"{"conversion":{"live_conversion":true}}"#).unwrap();
+        assert!(AppConfig::read_cached().conversion.live_conversion);
+        std::fs::write(&settings, r#"{"conversion":{"live_conversion":false}}"#).unwrap();
+        assert!(!AppConfig::read_cached().conversion.live_conversion);
+        std::fs::remove_file(&settings).unwrap();
+        assert!(!AppConfig::read_cached().conversion.live_conversion);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn config_parse_falls_back_on_invalid_json() {

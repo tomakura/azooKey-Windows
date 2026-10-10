@@ -355,7 +355,7 @@ impl TextServiceFactory {
             composition,
             mode,
             UserAction::try_from(wparam.0)?,
-            shared::AppConfig::read().conversion,
+            shared::AppConfig::read_cached().conversion,
         )
     }
 
@@ -400,7 +400,7 @@ impl TextServiceFactory {
         let mut corresponding_count = composition.corresponding_count;
         let mut candidates = composition.candidates.clone();
         let mut selection_index = composition.selection_index;
-        let app_config = shared::AppConfig::read();
+        let app_config = shared::AppConfig::read_cached();
         let symbol_input_style = app_config.conversion.symbol_input_style;
         let keyboard_layout = app_config.conversion.keyboard_layout;
         let mut ipc_service = IMEState::get()?
