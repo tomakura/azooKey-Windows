@@ -256,4 +256,4 @@ alpha.6の更新をUAC経由で開始したが、昇格処理は「ユーザー�
 - `cargo make build --release`で生成し、`verify-release.ps1`で3,475ファイルのハッシュ・サイズ・x64/x86構成と必要リソースを照合した（`target/verification/build-alpha11.log`）。
 - 配布物のEXEとSwift DLL、CUDA、推論2回で、44例の先頭一致44/44件、変換の中央値28.65ms・95パーセンタイル36.43msだった。並行予測を伴う240キーの入力RPCは中央値0.69ms・最大1.47ms。モデル全層のGPU配置を確認した（`inference-alpha11-packaged-{conversion_quality,input_latency}-cuda`）。
 - ユーザー承認を受け、実設定の推論回数を1から2へ変更した。変更前の設定は`target/verification/settings-before-alpha11.json`に保存した。
-- CIのリリースジョブはalpha.10専用のままで、alpha.11は公開していない。
+- CIのリリースジョブは`Installer.iss`の版からタグとリリースノートを決める。masterへの反映後、CIの検証を通ったインストーラーがalpha.11として公開される。
