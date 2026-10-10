@@ -17,7 +17,13 @@ New-Item -ItemType Directory -Path $engine,(Join-Path $profile 'Azookey') -Force
 Copy-Item -Path (Join-Path $installed '*.dll') -Destination $engine -Force
 $serverSource = if ($ServerExe) { $ServerExe } else { Join-Path $installed 'azookey-server.exe' }
 Copy-Item -LiteralPath $serverSource -Destination (Join-Path $engine 'azookey-server.exe') -Force
-if ($SwiftDll) { Copy-Item -LiteralPath $SwiftDll -Destination (Join-Path $engine 'azookey-server.dll') -Force }
+if ($SwiftDll) {
+    Copy-Item -LiteralPath $SwiftDll -Destination (Join-Path $engine 'azookey-server.dll') -Force
+    # A freshly built DLL needs the runtime of the toolchain that built it, not the installed one.
+    $runtime = Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs/Swift/Runtimes') -Directory |
+        Sort-Object Name -Descending | Select-Object -First 1
+    Copy-Item -Path (Join-Path $runtime.FullName 'usr/bin/*.dll') -Destination $engine -Force
+}
 foreach ($directory in (Get-ChildItem -LiteralPath $installed -Directory | Where-Object { $_.Name -in @('Dictionary','EmojiDictionary') })) {
     $link = Join-Path $engine $directory.Name
     if (!(Test-Path -LiteralPath $link)) { New-Item -ItemType Junction -Path $link -Target $directory.FullName | Out-Null }
@@ -48,7 +54,9 @@ $server = $null
 try {
     $env:APPDATA = $profile
     $env:AZOOKEY_INSTANCE = 'inference-' + $Label + '-' + $Backend
-    $env:PATH = (Join-Path $installed ('llama_' + $Backend)) + ';' + $originalPath
+    # A fresh DLL links against the repository's llama.lib, so pair it with the matching llama.dll.
+    $llamaRoot = if ($SwiftDll) { $repo } else { $installed }
+    $env:PATH = (Join-Path $llamaRoot ('llama_' + $Backend)) + ';' + $originalPath
     $log = Join-Path $root 'server.log'
     $server = Start-Process -FilePath (Join-Path $engine 'azookey-server.exe') -WindowStyle Hidden -PassThru -RedirectStandardOutput $log -RedirectStandardError (Join-Path $root 'server-error.log')
     $ready = $false
@@ -61,6 +69,10 @@ try {
     if (!$ready) { throw 'Test server failed to start' }
     & (Join-Path $repo ('target/debug/examples/' + $Benchmark + '.exe')) > (Join-Path $root 'results.json')
     if ($LASTEXITCODE -ne 0) { throw 'Inference benchmark failed' }
+    # Include startup so CPU totals are comparable only between runs of the same benchmark.
+    $server.Refresh()
+    @{ server_cpu_ms = [int]$server.TotalProcessorTime.TotalMilliseconds } | ConvertTo-Json |
+        Set-Content -LiteralPath (Join-Path $root 'cpu.json') -Encoding utf8
     if ($RequireGpuOffload) {
         $errorLog = Get-Content -LiteralPath (Join-Path $root 'server-error.log') -Raw
         if ($errorLog -notmatch 'offloaded (\d+)/(\d+) layers to GPU' -or

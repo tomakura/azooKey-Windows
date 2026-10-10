@@ -181,7 +181,10 @@ impl TextServiceFactory {
         if !starting && !continuing {
             return Ok(false);
         }
-        self.update_context(&composition.preview, &composition.suffix)?;
+        // Text before the composition cannot change while a clause session is open.
+        if composition.clause_session.is_none() {
+            self.update_context(&composition.preview, &composition.suffix)?;
+        }
         let mut ipc = IMEState::get()?
             .ipc_service
             .clone()
@@ -409,7 +412,17 @@ impl TextServiceFactory {
             .context("ipc_service is None")?;
         let mut transition = transition;
 
-        self.update_context(&preview, &suffix)?;
+        // Reading the document is a synchronous TSF edit session, so skip it on ordinary
+        // keystrokes: the text before the composition only changes when it starts or after a
+        // partial commit (handled in ShrinkText).
+        if actions.iter().any(|action| {
+            matches!(
+                action,
+                ClientAction::StartComposition | ClientAction::RequestCandidates { .. }
+            )
+        }) {
+            self.update_context(&preview, &suffix)?;
+        }
 
         for action in actions {
             match action {
@@ -614,6 +627,7 @@ impl TextServiceFactory {
                     raw_input = candidates.raw_input.clone();
                     self.shift_start(&preview, &text)?;
                     self.set_text(&text, &sub_text)?;
+                    self.update_context(&text, &sub_text)?;
                     preview = text.clone();
                     suffix = sub_text.clone();
                     raw_hiragana = hiragana.clone();
