@@ -10,6 +10,14 @@ nonisolated(unsafe) var readingText = ComposingText()
 nonisolated(unsafe) var lastCandidates: [Candidate] = []
 nonisolated(unsafe) var inputStyle: InputStyle = .roman2kana
 nonisolated(unsafe) var userEntries: [DicdataElement] = []
+// stopComposition() also clears the converter's private lastData, which links consecutive
+// commits for learning. Bridge it ourselves when the next input continues the committed text.
+nonisolated(unsafe) var converterLastDataCleared = true
+nonisolated(unsafe) var lastCommitted: (text: String, data: DicdataElement)?
+// Resolved once per configuration load instead of touching the file system on every request.
+nonisolated(unsafe) var memoryURL = URL(filePath: "")
+nonisolated(unsafe) var userDictionaryURL = URL(filePath: "")
+nonisolated(unsafe) var emojiURL = URL(filePath: "")
 
 nonisolated(unsafe) var execURL = URL(filePath: "")
 nonisolated(unsafe) var config: [String : Any] = [
@@ -89,7 +97,7 @@ func zenzaiMode(context: String) -> ConvertRequestOptions.ZenzaiMode {
 }
 
 func getOptions(context: String = "", predictionOnly: Bool = false) -> ConvertRequestOptions {
-    let emojiURL = emojiDictionaryURL()
+    let emojiURL = emojiURL
     return ConvertRequestOptions(
         N_best: max(1, min(32, (config["max_candidates"] as? Int) ?? 16)),
         requireJapanesePrediction: ((config["prediction"] as? Bool) ?? true) ? .manualMix : .disabled,
@@ -98,8 +106,8 @@ func getOptions(context: String = "", predictionOnly: Bool = false) -> ConvertRe
         englishCandidateInRoman2KanaInput: true,
         fullWidthRomanCandidate: true,
         learningType: ((config["learning"] as? Bool) ?? true) ? .inputAndOutput : .nothing,
-        memoryDirectoryURL: memoryDirectoryURL(),
-        sharedContainerURL: userDictionaryDirectoryURL(),
+        memoryDirectoryURL: memoryURL,
+        sharedContainerURL: userDictionaryURL,
         textReplacer: .init(emojiDataProvider: { emojiURL }),
         specialCandidateProviders: ((config["dynamic_candidates"] as? Bool) ?? true)
             ? KanaKanjiConverter.defaultSpecialCandidateProviders : [],
@@ -172,8 +180,12 @@ public func load_config() -> UnsafeMutablePointer<CChar> {
             ? try parseUserDictionary(String(contentsOf: dictionaryURL, encoding: .utf8)) : []
         config = next
         inputStyle = nextStyle
+        memoryURL = memoryDirectoryURL()
+        userDictionaryURL = userDictionaryDirectoryURL()
+        emojiURL = emojiDictionaryURL()
         composingText = ComposingText()
         converter?.stopComposition()
+        converterLastDataCleared = true
         userEntries = entries
         converter?.importDynamicUserDictionary(entries)
         return _strdup("")!
@@ -314,11 +326,13 @@ public func clear_text() {
     composingText = ComposingText()
     lastCandidates = []
     converter?.stopComposition()
+    converterLastDataCleared = true
 }
 
 @_silgen_name("ResetLearning")
 public func reset_learning() {
     converter?.resetMemory()
+    lastCommitted = nil
 }
 
 @_silgen_name("CommitCandidate")
@@ -332,8 +346,26 @@ public func commit_candidate(reading: UnsafePointer<CChar>, text: UnsafePointer<
         lastMid: MIDData.一般.mid,
         data: [DicdataElement(word: word, ruby: ruby, cid: CIDData.一般名詞.cid, mid: MIDData.一般.mid, value: -5)])
     converter.setCompletedData(candidate)
-    converter.updateLearningData(candidate)
-    converter.commitUpdateLearningData()
+    // Same data the converter builds from its own lastData: [previous] + candidate.data.
+    var learned = candidate
+    if converterLastDataCleared, let lastCommitted,
+       continuesCommittedText((config["context"] as? String) ?? "", lastCommitted.text) {
+        learned.data = [lastCommitted.data] + candidate.data
+    }
+    converter.updateLearningData(learned)
+    converterLastDataCleared = false
+    lastCommitted = candidate.data.last.map { (word, $0) }
+}
+
+/// Whether the text before the current input ends with the previously committed text.
+func continuesCommittedText(_ context: String, _ committed: String) -> Bool {
+    !context.isEmpty && !committed.isEmpty && (context.hasSuffix(committed) || committed.hasSuffix(context))
+}
+
+/// Persist learning in one batch; the Rust server calls this after commits settle.
+@_silgen_name("SaveLearning")
+public func save_learning() {
+    converter?.commitUpdateLearningData()
 }
 
 @_silgen_name("FreeText")
@@ -381,6 +413,7 @@ public func get_snapshot_candidates(input: UnsafePointer<CChar>, rawInput: Unsaf
     let next = raw.isEmpty ? String(cString: input) : raw
     if !next.hasPrefix(MixedInput.raw(composingText)) {
         converter?.stopComposition()
+        converterLastDataCleared = true
     }
     MixedInput.update(&composingText, raw: next, style: raw.isEmpty ? .direct : inputStyle)
     return collect_candidates(lengthPtr: lengthPtr, predictionOnly: predictionOnly, normalOnly: !predictionOnly)

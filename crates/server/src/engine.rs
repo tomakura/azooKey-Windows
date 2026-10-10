@@ -38,6 +38,7 @@ unsafe extern "C" {
     fn LoadConfig() -> *mut c_char;
     fn ResetLearning();
     fn CommitCandidate(reading: *const c_char, text: *const c_char);
+    fn SaveLearning();
     fn FreeText(text: *mut c_char);
     fn FreeCandidates(candidates: *mut *mut FFICandidate, count: c_int);
     fn GetZenzaiStatus() -> *mut c_char;
@@ -49,6 +50,7 @@ pub struct Engine {
     resource_dir: PathBuf,
     context: String,
     registered_words: HashSet<String>,
+    unsaved_learning: bool,
 }
 
 fn c_string(text: &str) -> Result<CString, String> {
@@ -97,6 +99,7 @@ impl Engine {
             resource_dir: resource_dir.to_path_buf(),
             context: String::new(),
             registered_words: Self::registered_words()?,
+            unsaved_learning: false,
         })
     }
 
@@ -190,7 +193,15 @@ impl Engine {
         let reading = c_string(reading)?;
         let text = c_string(text)?;
         unsafe { CommitCandidate(reading.as_ptr(), text.as_ptr()) };
+        self.unsaved_learning = true;
         Ok(())
+    }
+
+    /// Commits update in-memory learning immediately; this rewrites the memory files.
+    pub fn save_learning(&mut self) {
+        if std::mem::take(&mut self.unsaved_learning) {
+            unsafe { SaveLearning() };
+        }
     }
 
     pub fn set_context(&mut self, text: &str) -> Result<(), String> {
@@ -595,11 +606,16 @@ mod tests {
             engine.commit("かんじ", "検証学習語").unwrap();
         }
         engine.clear();
+        // Learning applies before the batched save, and saving writes the memory files.
         let result = engine.append("かんじ").unwrap();
         assert!(result
             .suggestions
             .iter()
             .any(|candidate| candidate.text == "検証学習語"));
+        engine.save_learning();
+        assert!(PathBuf::from(std::env::var_os("APPDATA").unwrap())
+            .join("Azookey/memory/memory.louds")
+            .is_file());
         engine.clear();
         config.learning.enable = false;
         config.write();
@@ -621,6 +637,25 @@ mod tests {
             .iter()
             .any(|candidate| candidate.text == "検証学習語"));
 
+        // Clearing after each commit must not forget the previous word when the next input
+        // continues it; the pair is then learned as one clause. Unrelated input stays separate.
+        for (context, linked) in [("無関係", false), ("検証学習語", true)] {
+            engine.reset_learning();
+            engine.clear();
+            engine.convert("かんじ".into(), "", "", false).unwrap();
+            engine.commit("かんじ", "検証学習語").unwrap();
+            engine.clear();
+            engine.convert("てすと".into(), "", context, false).unwrap();
+            engine.commit("てすと", "試験語").unwrap();
+            engine.clear();
+            let result = engine
+                .convert("かんじてすと".into(), "", "", false)
+                .unwrap();
+            assert_eq!(result.suggestions[0].text, "検証学習語試験語");
+            assert_eq!(result.suggestions[0].clauses.len() == 1, linked);
+            engine.clear();
+        }
+        engine.reset_learning();
         engine.clear();
         let long = engine.append("nihongonyuuryoku").unwrap();
         assert_eq!(long.hiragana, "にほんごにゅうりょく");

@@ -48,7 +48,7 @@ fn build_candidate_html() -> String {
 }
 
 pub fn theme_css() -> String {
-    let config = shared::AppConfig::read();
+    let config = shared::AppConfig::read_cached();
     let appearance = &config.appearance;
 
     if appearance.custom_css_enabled {

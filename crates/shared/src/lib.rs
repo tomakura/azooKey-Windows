@@ -20,6 +20,7 @@ fn get_config_root() -> PathBuf {
 }
 
 const SETTINGS_FILENAME: &str = "settings.json";
+const CONFIG_RECHECK: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Independent verification processes use a separate instance without touching the installed IME.
 pub fn pipe_path(name: &str) -> String {
@@ -289,6 +290,30 @@ impl AppConfig {
         parse_config_or_default(&config_str)
     }
 
+    /// Keystroke paths call this: it re-reads the file only when its timestamp or size changes,
+    /// and checks that at most every `CONFIG_RECHECK` because opening the file costs ~60µs.
+    pub fn read_cached() -> Self {
+        use std::time::{Instant, SystemTime};
+        type Stamp = Option<(SystemTime, u64)>;
+        static CACHE: std::sync::Mutex<Option<(Instant, Stamp, AppConfig)>> =
+            std::sync::Mutex::new(None);
+        let mut cache = CACHE.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some((checked, _, config)) = cache.as_ref() {
+            if checked.elapsed() < CONFIG_RECHECK {
+                return config.clone();
+            }
+        }
+        let stamp = std::fs::metadata(get_config_root().join(SETTINGS_FILENAME))
+            .ok()
+            .and_then(|metadata| Some((metadata.modified().ok()?, metadata.len())));
+        let config = match cache.take() {
+            Some((_, cached, config)) if cached == stamp => config,
+            _ => AppConfig::read(),
+        };
+        *cache = Some((Instant::now(), stamp, config.clone()));
+        config
+    }
+
     pub fn new() -> Self {
         let config_path = get_config_root();
         let _ = std::fs::create_dir_all(&config_path);
@@ -305,6 +330,24 @@ fn parse_config_or_default(config_str: &str) -> AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_config_follows_file_changes() {
+        let root = std::env::temp_dir().join(format!("azookey-cache-{}", std::process::id()));
+        std::env::set_var("APPDATA", &root);
+        std::fs::create_dir_all(root.join("Azookey")).unwrap();
+        let settings = root.join("Azookey").join(SETTINGS_FILENAME);
+        let settle = || std::thread::sleep(CONFIG_RECHECK + std::time::Duration::from_millis(50));
+        std::fs::write(&settings, r#"{"conversion":{"live_conversion":true}}"#).unwrap();
+        assert!(AppConfig::read_cached().conversion.live_conversion);
+        std::fs::write(&settings, r#"{"conversion":{"live_conversion":false}}"#).unwrap();
+        settle();
+        assert!(!AppConfig::read_cached().conversion.live_conversion);
+        std::fs::write(&settings, r#"{"conversion":{"live_conversion":true }}"#).unwrap();
+        settle();
+        assert!(AppConfig::read_cached().conversion.live_conversion);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn config_parse_falls_back_on_invalid_json() {

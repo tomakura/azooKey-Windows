@@ -14,6 +14,26 @@ static READING: Mutex<()> = Mutex::new(());
 static RESTART_CHILD: Mutex<Option<std::process::Child>> = Mutex::new(None);
 static RESTART: tokio::sync::Notify = tokio::sync::Notify::const_new();
 static SHUTDOWN: tokio::sync::Notify = tokio::sync::Notify::const_new();
+static COMMITS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Saving rewrites every learning file, so write once after commits pause instead of per commit.
+fn schedule_learning_save() {
+    use std::sync::atomic::Ordering;
+    let commit = COMMITS.fetch_add(1, Ordering::SeqCst) + 1;
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+        if COMMITS.load(Ordering::SeqCst) == commit {
+            let _ = tokio::task::spawn_blocking(save_learning).await;
+        }
+    });
+}
+
+fn save_learning() {
+    let _ = with_engine(|engine| {
+        engine.save_learning();
+        Ok(())
+    });
+}
 
 /// Prepare the replacement using the saved backend without changing this process's environment.
 fn restart_command() -> Result<std::process::Command, Box<dyn std::error::Error>> {
@@ -244,6 +264,7 @@ impl AzookeyService for MyAzookeyService {
     ) -> Result<Response<CommitCandidateResponse>, Status> {
         let request = request.into_inner();
         with_engine(|engine| engine.commit(&request.reading, &request.text))?;
+        schedule_learning_save();
         Ok(Response::new(CommitCandidateResponse {}))
     }
 
@@ -286,6 +307,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     tokio::select! {
         result = &mut server => {
+            save_learning();
             result??;
             return Ok(());
         }
@@ -296,6 +318,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Ok(result) = tokio::time::timeout(std::time::Duration::from_secs(3), &mut server).await {
         result??;
     }
+    save_learning();
     // Close every old named-pipe handle before the child initializes its listener.
     std::process::exit(0)
 }

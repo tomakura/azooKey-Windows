@@ -181,7 +181,10 @@ impl TextServiceFactory {
         if !starting && !continuing {
             return Ok(false);
         }
-        self.update_context(&composition.preview, &composition.suffix)?;
+        // Text before the composition cannot change while a clause session is open.
+        if composition.clause_session.is_none() {
+            self.update_context(&composition.preview, &composition.suffix)?;
+        }
         let mut ipc = IMEState::get()?
             .ipc_service
             .clone()
@@ -355,7 +358,7 @@ impl TextServiceFactory {
             composition,
             mode,
             UserAction::try_from(wparam.0)?,
-            shared::AppConfig::read().conversion,
+            shared::AppConfig::read_cached().conversion,
         )
     }
 
@@ -400,7 +403,7 @@ impl TextServiceFactory {
         let mut corresponding_count = composition.corresponding_count;
         let mut candidates = composition.candidates.clone();
         let mut selection_index = composition.selection_index;
-        let app_config = shared::AppConfig::read();
+        let app_config = shared::AppConfig::read_cached();
         let symbol_input_style = app_config.conversion.symbol_input_style;
         let keyboard_layout = app_config.conversion.keyboard_layout;
         let mut ipc_service = IMEState::get()?
@@ -409,7 +412,17 @@ impl TextServiceFactory {
             .context("ipc_service is None")?;
         let mut transition = transition;
 
-        self.update_context(&preview, &suffix)?;
+        // Reading the document is a synchronous TSF edit session, so skip it on ordinary
+        // keystrokes: the text before the composition only changes when it starts or after a
+        // partial commit (handled in ShrinkText).
+        if actions.iter().any(|action| {
+            matches!(
+                action,
+                ClientAction::StartComposition | ClientAction::RequestCandidates { .. }
+            )
+        }) {
+            self.update_context(&preview, &suffix)?;
+        }
 
         for action in actions {
             match action {
@@ -471,7 +484,6 @@ impl TextServiceFactory {
 
                     self.set_text(&text, &sub_text)?;
                     ipc_service.schedule_prediction(hiragana)?;
-                    ipc_service.set_selection(-1)?;
                 }
                 ClientAction::RemoveText => {
                     candidates = ipc_service.remove_text()?;
@@ -509,7 +521,6 @@ impl TextServiceFactory {
 
                     self.set_text(&text, &sub_text)?;
                     ipc_service.schedule_prediction(hiragana)?;
-                    ipc_service.set_selection(-1)?;
                 }
                 ClientAction::MoveCursor(_offset) => {
                     // TODO: I'll use azookey-kkc's composingText
@@ -614,12 +625,12 @@ impl TextServiceFactory {
                     raw_input = candidates.raw_input.clone();
                     self.shift_start(&preview, &text)?;
                     self.set_text(&text, &sub_text)?;
+                    self.update_context(&text, &sub_text)?;
                     preview = text.clone();
                     suffix = sub_text.clone();
                     raw_hiragana = hiragana.clone();
 
                     ipc_service.schedule_prediction(hiragana)?;
-                    ipc_service.set_selection(-1)?;
                     self.update_pos()?;
 
                     transition = CompositionState::Composing;

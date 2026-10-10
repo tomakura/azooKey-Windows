@@ -141,3 +141,12 @@ import KanaKanjiConverterModule
     #expect(edit("", 2, 2) == "じ")
     #expect(edit("", 3) == "")
 }
+
+/// Learning links consecutive commits only when the new input follows the committed text.
+@Test func commitsLinkOnlyWhenInputContinuesCommittedText() {
+    #expect(continuesCommittedText("昨日は会議で今日は", "今日は"))
+    #expect(continuesCommittedText("今日は", "とても長い確定文字列の末尾の今日は"))
+    #expect(!continuesCommittedText("別の段落", "今日は"))
+    #expect(!continuesCommittedText("", "今日は"))
+    #expect(!continuesCommittedText("今日は", ""))
+}
