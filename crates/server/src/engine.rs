@@ -637,6 +637,25 @@ mod tests {
             .iter()
             .any(|candidate| candidate.text == "検証学習語"));
 
+        // Clearing after each commit must not forget the previous word when the next input
+        // continues it; the pair is then learned as one clause. Unrelated input stays separate.
+        for (context, linked) in [("無関係", false), ("検証学習語", true)] {
+            engine.reset_learning();
+            engine.clear();
+            engine.convert("かんじ".into(), "", "", false).unwrap();
+            engine.commit("かんじ", "検証学習語").unwrap();
+            engine.clear();
+            engine.convert("てすと".into(), "", context, false).unwrap();
+            engine.commit("てすと", "試験語").unwrap();
+            engine.clear();
+            let result = engine
+                .convert("かんじてすと".into(), "", "", false)
+                .unwrap();
+            assert_eq!(result.suggestions[0].text, "検証学習語試験語");
+            assert_eq!(result.suggestions[0].clauses.len() == 1, linked);
+            engine.clear();
+        }
+        engine.reset_learning();
         engine.clear();
         let long = engine.append("nihongonyuuryoku").unwrap();
         assert_eq!(long.hiragana, "にほんごにゅうりょく");
