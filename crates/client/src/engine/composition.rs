@@ -484,7 +484,6 @@ impl TextServiceFactory {
 
                     self.set_text(&text, &sub_text)?;
                     ipc_service.schedule_prediction(hiragana)?;
-                    ipc_service.set_selection(-1)?;
                 }
                 ClientAction::RemoveText => {
                     candidates = ipc_service.remove_text()?;
@@ -522,7 +521,6 @@ impl TextServiceFactory {
 
                     self.set_text(&text, &sub_text)?;
                     ipc_service.schedule_prediction(hiragana)?;
-                    ipc_service.set_selection(-1)?;
                 }
                 ClientAction::MoveCursor(_offset) => {
                     // TODO: I'll use azookey-kkc's composingText
@@ -633,7 +631,6 @@ impl TextServiceFactory {
                     raw_hiragana = hiragana.clone();
 
                     ipc_service.schedule_prediction(hiragana)?;
-                    ipc_service.set_selection(-1)?;
                     self.update_pos()?;
 
                     transition = CompositionState::Composing;

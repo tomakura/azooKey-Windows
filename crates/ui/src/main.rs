@@ -150,6 +150,8 @@ async fn main() -> anyhow::Result<()> {
 
     let mut composition_visible = false;
     let mut has_candidates = false;
+    // The page is built with the current theme already applied.
+    let mut candidate_css = candidate::theme_css();
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
 
@@ -163,10 +165,14 @@ async fn main() -> anyhow::Result<()> {
             } => *control_flow = ControlFlow::Exit,
             Event::UserEvent(script) => match script {
                 UserEvent::UpdateCandidates(candidates) => {
-                    let css = serde_json::to_string(&candidate::theme_css()).unwrap();
-                    candidate_webview
-                        .evaluate_script(&format!("updateTheme({css})"))
-                        .unwrap();
+                    // Replacing the stylesheet forces a full style recalculation; do it only on change.
+                    let css = candidate::theme_css();
+                    if css != candidate_css {
+                        let script =
+                            format!("updateTheme({})", serde_json::to_string(&css).unwrap());
+                        candidate_webview.evaluate_script(&script).unwrap();
+                        candidate_css = css;
+                    }
                     candidate_webview
                         .evaluate_script(&format!("updateCandidates({})", candidates))
                         .unwrap();
@@ -275,6 +281,10 @@ async fn main() -> anyhow::Result<()> {
                             ));
                         }
                         WindowAction::SetCandidate { candidates } => {
+                            // Every keystroke clears pending predictions; an empty list stays empty.
+                            if candidates.is_empty() && !has_candidates {
+                                return;
+                            }
                             has_candidates = !candidates.is_empty();
                             unsafe {
                                 let _ = ShowWindow(

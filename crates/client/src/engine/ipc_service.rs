@@ -338,7 +338,9 @@ impl IPCService {
             .raw_input
             .lock()
             .map_err(|_| anyhow::anyhow!("Input mutex poisoned"))? = candidates.raw_input.clone();
-        if shared::AppConfig::read_cached().conversion.live_conversion && !candidates.is_latin_input() {
+        if shared::AppConfig::read_cached().conversion.live_conversion
+            && !candidates.is_latin_input()
+        {
             self.convert_text(candidates.hiragana, false)
         } else {
             Ok(candidates)
