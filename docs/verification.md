@@ -247,3 +247,13 @@ alpha.6の更新をUAC経由で開始したが、昇格処理は「ユーザー�
 - 計測スクリプトは新しくビルドしたSwift DLLに、ツールチェーンのSwiftランタイムとリポジトリのllama.dllを組み合わせ、エンジンのCPU時間も`cpu.json`へ記録する。
 - 証跡: `target/verification/inference-perf-{base,after}-{conversion_quality,input_latency}-cuda/`、`safe-perf.log`。
 - 実アプリでの打鍵の体感確認は、更新インストールと再サインインの後に行う。
+
+## alpha.11の配布物
+
+- 版: `0.1.0-alpha.11`（上の負荷削減と確定をまたぐ学習を含む）
+- インストーラー: `build/azookey-setup.exe` (511257861 bytes)
+- SHA256: `0AD945B26EC3117888FA5B26BF1CCDAE949D2C792B034233A99F765CDCCB7DA2`
+- `cargo make build --release`で生成し、`verify-release.ps1`で3,475ファイルのハッシュ・サイズ・x64/x86構成と必要リソースを照合した（`target/verification/build-alpha11.log`）。
+- 配布物のEXEとSwift DLL、CUDA、推論2回で、44例の先頭一致44/44件、変換の中央値28.65ms・95パーセンタイル36.43msだった。並行予測を伴う240キーの入力RPCは中央値0.69ms・最大1.47ms。モデル全層のGPU配置を確認した（`inference-alpha11-packaged-{conversion_quality,input_latency}-cuda`）。
+- ユーザー承認を受け、実設定の推論回数を1から2へ変更した。変更前の設定は`target/verification/settings-before-alpha11.json`に保存した。
+- CIのリリースジョブはalpha.10専用のままで、alpha.11は公開していない。
