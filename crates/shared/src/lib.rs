@@ -3,8 +3,9 @@ use std::path::PathBuf;
 
 pub mod server_process;
 
-// Tonic's generated API requires its unboxed Status return type.
-#[allow(clippy::result_large_err)]
+// Tonic's generated API requires its unboxed Status return type, and newer Clippy flags the
+// `#[must_use]` that async_trait adds to its generated service methods.
+#[allow(clippy::result_large_err, clippy::double_must_use)]
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/azookey.rs"));
     include!(concat!(env!("OUT_DIR"), "/window.rs"));
