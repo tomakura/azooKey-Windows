@@ -290,27 +290,19 @@ impl AppConfig {
         parse_config_or_default(&config_str)
     }
 
-    /// Keystroke paths call this: it re-reads the file only when its timestamp or size changes,
-    /// and checks that at most every `CONFIG_RECHECK` because opening the file costs ~60µs.
+    /// Keystroke paths call this: it re-reads the file at most every `CONFIG_RECHECK`.
+    /// Reading unconditionally (~150µs) also catches rewrites that keep the timestamp and size.
     pub fn read_cached() -> Self {
-        use std::time::{Instant, SystemTime};
-        type Stamp = Option<(SystemTime, u64)>;
-        static CACHE: std::sync::Mutex<Option<(Instant, Stamp, AppConfig)>> =
-            std::sync::Mutex::new(None);
+        use std::time::Instant;
+        static CACHE: std::sync::Mutex<Option<(Instant, AppConfig)>> = std::sync::Mutex::new(None);
         let mut cache = CACHE.lock().unwrap_or_else(|error| error.into_inner());
-        if let Some((checked, _, config)) = cache.as_ref() {
-            if checked.elapsed() < CONFIG_RECHECK {
+        if let Some((read, config)) = cache.as_ref() {
+            if read.elapsed() < CONFIG_RECHECK {
                 return config.clone();
             }
         }
-        let stamp = std::fs::metadata(get_config_root().join(SETTINGS_FILENAME))
-            .ok()
-            .and_then(|metadata| Some((metadata.modified().ok()?, metadata.len())));
-        let config = match cache.take() {
-            Some((_, cached, config)) if cached == stamp => config,
-            _ => AppConfig::read(),
-        };
-        *cache = Some((Instant::now(), stamp, config.clone()));
+        let config = AppConfig::read();
+        *cache = Some((Instant::now(), config.clone()));
         config
     }
 
@@ -343,7 +335,8 @@ mod tests {
         std::fs::write(&settings, r#"{"conversion":{"live_conversion":false}}"#).unwrap();
         settle();
         assert!(!AppConfig::read_cached().conversion.live_conversion);
-        std::fs::write(&settings, r#"{"conversion":{"live_conversion":true }}"#).unwrap();
+        // Same size as the previous file, as when an editor rewrites a flag within one tick.
+        std::fs::write(&settings, r#"{"conversion":{"live_conversion":true}} "#).unwrap();
         settle();
         assert!(AppConfig::read_cached().conversion.live_conversion);
         std::fs::remove_dir_all(root).unwrap();

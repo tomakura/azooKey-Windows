@@ -145,7 +145,9 @@ import KanaKanjiConverterModule
 /// Learning links consecutive commits only when the new input follows the committed text.
 @Test func commitsLinkOnlyWhenInputContinuesCommittedText() {
     #expect(continuesCommittedText("昨日は会議で今日は", "今日は"))
-    #expect(continuesCommittedText("今日は", "とても長い確定文字列の末尾の今日は"))
+    let long = "とても長い確定文字列は文脈の上限を超えても末尾で判定する"
+    #expect(continuesCommittedText(String(long.suffix(20)), long))
+    #expect(!continuesCommittedText("は", "今日は"))
     #expect(!continuesCommittedText("別の段落", "今日は"))
     #expect(!continuesCommittedText("", "今日は"))
     #expect(!continuesCommittedText("今日は", ""))

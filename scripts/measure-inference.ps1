@@ -21,7 +21,7 @@ if ($SwiftDll) {
     Copy-Item -LiteralPath $SwiftDll -Destination (Join-Path $engine 'azookey-server.dll') -Force
     # A freshly built DLL needs the runtime of the toolchain that built it, not the installed one.
     $runtime = Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Programs/Swift/Runtimes') -Directory |
-        Sort-Object Name -Descending | Select-Object -First 1
+        Sort-Object { [version]$_.Name } | Select-Object -Last 1
     Copy-Item -Path (Join-Path $runtime.FullName 'usr/bin/*.dll') -Destination $engine -Force
 }
 foreach ($directory in (Get-ChildItem -LiteralPath $installed -Directory | Where-Object { $_.Name -in @('Dictionary','EmojiDictionary') })) {

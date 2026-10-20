@@ -315,10 +315,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     // Let the restart RPC finish, but do not let persistent IPC clients block shutdown.
     SHUTDOWN.notify_one();
-    if let Ok(result) = tokio::time::timeout(std::time::Duration::from_secs(3), &mut server).await {
+    let result = tokio::time::timeout(std::time::Duration::from_secs(3), &mut server).await;
+    // Save before propagating a server error so a failed shutdown still keeps learning.
+    save_learning();
+    if let Ok(result) = result {
         result??;
     }
-    save_learning();
     // Close every old named-pipe handle before the child initializes its listener.
     std::process::exit(0)
 }

@@ -358,8 +358,9 @@ public func commit_candidate(reading: UnsafePointer<CChar>, text: UnsafePointer<
 }
 
 /// Whether the text before the current input ends with the previously committed text.
+/// The context holds at most 64 UTF-16 units, so a longer commit is matched by its tail.
 func continuesCommittedText(_ context: String, _ committed: String) -> Bool {
-    !context.isEmpty && !committed.isEmpty && (context.hasSuffix(committed) || committed.hasSuffix(context))
+    !committed.isEmpty && context.hasSuffix(committed.suffix(16))
 }
 
 /// Persist learning in one batch; the Rust server calls this after commits settle.
