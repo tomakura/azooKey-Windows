@@ -35,6 +35,8 @@ import KanaKanjiConverterModule
         ("pythonnobug", "pythonのbug"),
         ("kyouhagithub", "きょうはgithub"),
         ("soshitegithub", "そしてgithub"),
+        ("opushon", "おぷしょん"),
+        ("opusyon", "おぷしょん"),
         ("İgithub", "İgithub"),
         ("arigatougozaimasu", "ありがとうございます"),
         ("konnnichiha", "こんにちは"),
