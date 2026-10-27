@@ -91,10 +91,12 @@ enum MixedInput {
                     // Do not split an unfinished kana syllable: "shit" in
                     // "soshite" is followed by the vowel that completes "て",
                     // and "opus" in "opusyon" is followed by the "yo" of "しょ".
-                    // Only vowels, "y" and "h" continue a syllable; "meeting" + "g..."
-                    // must stay English even though "ng" + "ga" would read as kana.
+                    // Vowels, "y", "h" and "s" ("ts" of つ) continue a syllable, as does
+                    // a doubled k/s/t/p/c (っ: "chat" + "ta"). Other doubled letters stay
+                    // English: "meeting" + "g..." must not read as "ng" + "ga".
                     if !nodes[node].product, candidateEnd < characters.count,
-                       "aeiouyh".contains(characters[candidateEnd]) {
+                       "aeiouyhs".contains(characters[candidateEnd])
+                        || ("ktpsc".contains(characters[candidateEnd]) && characters[candidateEnd] == word.last) {
                         let completes = (1...3).contains { length in
                             guard candidateEnd + length <= characters.count else { return false }
                             let tail = characters[candidateEnd..<candidateEnd + length]
