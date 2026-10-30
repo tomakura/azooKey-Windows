@@ -32,7 +32,9 @@ jobs:
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: server-swift/.build
-        key: ${{ runner.os }}-swift-6.3.2-${{ hashFiles('server-swift/Package.swift', 'server-swift/Package.resolved', 'server-swift/patches/*.patch') }}
+        # Each master run saves a fresh snapshot; PRs restore the newest one by prefix.
+        key: ${{ runner.os }}-swift-6.3.2-${{ hashFiles('server-swift/Package.swift', 'server-swift/Package.resolved', 'server-swift/patches/*.patch') }}-${{ github.run_id }}
+        restore-keys: ${{ runner.os }}-swift-6.3.2-${{ hashFiles('server-swift/Package.swift', 'server-swift/Package.resolved', 'server-swift/patches/*.patch') }}-
 
     - name: Install Swift
       uses: compnerd/gha-setup-swift@bbae8ce86bac5a3449f3992b3d88bc4ca25f2057 # main
@@ -144,7 +146,7 @@ jobs:
         if-no-files-found: error
 
     - name: Save Swift build cache
-      if: always() && !cancelled() && steps.swift-cache.outputs.cache-hit != 'true'
+      if: always() && !cancelled() && github.ref == 'refs/heads/master'
       uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: server-swift/.build
