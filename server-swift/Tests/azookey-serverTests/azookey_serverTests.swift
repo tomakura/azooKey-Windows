@@ -35,8 +35,9 @@ import KanaKanjiConverterModule
         ("pythonnobug", "pythonのbug"),
         ("kyouhagithub", "きょうはgithub"),
         ("soshitegithub", "そしてgithub"),
-        ("opushon", "おぷしょん"),
-        ("opusyon", "おぷしょん"),
+        // A final single "n" waits for the next stroke, as in plain romaji input.
+        ("opushon", "おぷしょn"),
+        ("opusyon", "おぷしょn"),
         ("hashutsujo", "はしゅつじょ"),
         ("chatta", "ちゃった"),
         ("chippu", "ちっぷ"),
