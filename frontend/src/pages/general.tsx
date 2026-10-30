@@ -463,11 +463,11 @@ export const General = () => {
                     <RefreshCcw />
                     <div className="flex-1 space-y-1">
                         <p className="text-sm font-medium leading-none">
-                            v0.1.0-alpha.9
+                            v{__APP_VERSION__}
                         </p>
                     </div>
                     <Button  variant="secondary">
-                        <a href="https://github.com/fkunn1326/azooKey-Windows/releases" className="flex items-center gap-x-2" target="_blank" rel="noopener noreferrer">
+                        <a href="https://github.com/tomakura/azooKey-Windows/releases" className="flex items-center gap-x-2" target="_blank" rel="noopener noreferrer">
                             <ExternalLink />
                             更新を確認する
                         </a>

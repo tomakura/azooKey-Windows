@@ -2,12 +2,17 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path"
 import tailwindcss from '@tailwindcss/vite'
+import tauriConfig from "./src-tauri/tauri.conf.json"
 
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+  // The release workflow requires this to match the installer version.
+  define: {
+    __APP_VERSION__: JSON.stringify(tauriConfig.version),
+  },
   
   resolve: {
     alias: {

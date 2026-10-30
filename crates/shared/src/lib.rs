@@ -3,8 +3,9 @@ use std::path::PathBuf;
 
 pub mod server_process;
 
-// Tonic's generated API requires its unboxed Status return type.
-#[allow(clippy::result_large_err)]
+// Tonic's generated API requires its unboxed Status return type, and newer Clippy flags the
+// `#[must_use]` that async_trait adds to its generated service methods.
+#[allow(clippy::result_large_err, clippy::double_must_use)]
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/azookey.rs"));
     include!(concat!(env!("OUT_DIR"), "/window.rs"));
@@ -20,6 +21,7 @@ fn get_config_root() -> PathBuf {
 }
 
 const SETTINGS_FILENAME: &str = "settings.json";
+const CONFIG_RECHECK: std::time::Duration = std::time::Duration::from_millis(500);
 
 /// Independent verification processes use a separate instance without touching the installed IME.
 pub fn pipe_path(name: &str) -> String {
@@ -289,6 +291,22 @@ impl AppConfig {
         parse_config_or_default(&config_str)
     }
 
+    /// Keystroke paths call this: it re-reads the file at most every `CONFIG_RECHECK`.
+    /// Reading unconditionally (~150µs) also catches rewrites that keep the timestamp and size.
+    pub fn read_cached() -> Self {
+        use std::time::Instant;
+        static CACHE: std::sync::Mutex<Option<(Instant, AppConfig)>> = std::sync::Mutex::new(None);
+        let mut cache = CACHE.lock().unwrap_or_else(|error| error.into_inner());
+        if let Some((read, config)) = cache.as_ref() {
+            if read.elapsed() < CONFIG_RECHECK {
+                return config.clone();
+            }
+        }
+        let config = AppConfig::read();
+        *cache = Some((Instant::now(), config.clone()));
+        config
+    }
+
     pub fn new() -> Self {
         let config_path = get_config_root();
         let _ = std::fs::create_dir_all(&config_path);
@@ -305,6 +323,25 @@ fn parse_config_or_default(config_str: &str) -> AppConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cached_config_follows_file_changes() {
+        let root = std::env::temp_dir().join(format!("azookey-cache-{}", std::process::id()));
+        std::env::set_var("APPDATA", &root);
+        std::fs::create_dir_all(root.join("Azookey")).unwrap();
+        let settings = root.join("Azookey").join(SETTINGS_FILENAME);
+        let settle = || std::thread::sleep(CONFIG_RECHECK + std::time::Duration::from_millis(50));
+        std::fs::write(&settings, r#"{"conversion":{"live_conversion":true}}"#).unwrap();
+        assert!(AppConfig::read_cached().conversion.live_conversion);
+        std::fs::write(&settings, r#"{"conversion":{"live_conversion":false}}"#).unwrap();
+        settle();
+        assert!(!AppConfig::read_cached().conversion.live_conversion);
+        // Same size as the previous file, as when an editor rewrites a flag within one tick.
+        std::fs::write(&settings, r#"{"conversion":{"live_conversion":true}} "#).unwrap();
+        settle();
+        assert!(AppConfig::read_cached().conversion.live_conversion);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn config_parse_falls_back_on_invalid_json() {

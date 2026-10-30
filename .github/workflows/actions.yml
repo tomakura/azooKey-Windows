@@ -150,8 +150,8 @@ jobs:
         path: server-swift/.build
         key: ${{ steps.swift-cache.outputs.cache-primary-key }}
 
-  release-alpha10:
-    name: Publish alpha.10
+  release:
+    name: Publish installer version
     needs: build
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: windows-latest
@@ -165,15 +165,21 @@ jobs:
       with:
         name: azookey-setup
         path: release-assets
-    - name: Publish verified alpha.10
+    - name: Publish verified installer version
       shell: pwsh
       env:
         GH_TOKEN: ${{ github.token }}
       run: |
         $ErrorActionPreference = 'Stop'
-        $tag = 'v0.1.0-alpha.10'
-        if (!(Select-String -LiteralPath installer/Installer.iss -SimpleMatch '#define MyAppVersion "0.1.0-alpha.10"')) {
-          throw 'Installer version does not match the requested release'
+        # The installer version selects the tag and notes; bump it to publish a new prerelease.
+        $match = Select-String -LiteralPath installer/Installer.iss -Pattern '^#define MyAppVersion "(\d+\.\d+\.\d+-alpha\.(\d+))"$'
+        if (!$match) { throw 'Installer version must be a numbered alpha' }
+        $version = $match.Matches[0].Groups[1].Value
+        $tag = "v$version"
+        $notes = "docs/releases/alpha$($match.Matches[0].Groups[2].Value).md"
+        if (!(Test-Path -LiteralPath $notes)) { throw "Missing release notes: $notes" }
+        if ((Get-Content -LiteralPath frontend/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version -ne $version) {
+          throw 'Settings app version does not match the installer version'
         }
         $existing = & gh release list --limit 100 --json tagName,isDraft 2>&1
         if ($LASTEXITCODE -ne 0) { throw ($existing -join "`n") }
@@ -203,7 +209,7 @@ jobs:
           # A previous upload may have stopped halfway; repair both assets before publishing.
           gh release upload $tag release-assets/azookey-setup.exe release-assets/azookey-setup.exe.sha256 --clobber
         } else {
-          gh release create $tag release-assets/azookey-setup.exe release-assets/azookey-setup.exe.sha256 --target $env:GITHUB_SHA --title $tag --notes-file docs/releases/alpha10.md --prerelease --draft
+          gh release create $tag release-assets/azookey-setup.exe release-assets/azookey-setup.exe.sha256 --target $env:GITHUB_SHA --title $tag --notes-file $notes --prerelease --draft
         }
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         gh release edit $tag --draft=false

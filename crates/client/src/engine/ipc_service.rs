@@ -338,7 +338,9 @@ impl IPCService {
             .raw_input
             .lock()
             .map_err(|_| anyhow::anyhow!("Input mutex poisoned"))? = candidates.raw_input.clone();
-        if shared::AppConfig::read().conversion.live_conversion && !candidates.is_latin_input() {
+        if shared::AppConfig::read_cached().conversion.live_conversion
+            && !candidates.is_latin_input()
+        {
             self.convert_text(candidates.hiragana, false)
         } else {
             Ok(candidates)
@@ -448,7 +450,7 @@ impl IPCService {
                 id.clone(),
                 true,
             )))?;
-        if reading.is_empty() || !shared::AppConfig::read().conversion.prediction {
+        if reading.is_empty() || !shared::AppConfig::read_cached().conversion.prediction {
             return Ok(());
         }
         let context = self

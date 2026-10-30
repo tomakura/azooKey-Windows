@@ -89,11 +89,22 @@ enum MixedInput {
                     .contains { $0.isASCII && $0.isLetter }
                 if nodes[node].product || hasUnconvertedLetters {
                     // Do not split an unfinished kana syllable: "shit" in
-                    // "soshite" is followed by the vowel that completes "て".
+                    // "soshite" is followed by the vowel that completes "て",
+                    // and "opus" in "opusyon" is followed by the "yo" of "しょ".
+                    // Vowels, "y", "h" and "s" ("ts" of つ) continue a syllable, as does
+                    // a doubled k/s/t/p/c (っ: "chat" + "ta"). Other doubled letters stay
+                    // English: "meeting" + "g..." must not read as "ng" + "ga".
                     if !nodes[node].product, candidateEnd < characters.count,
-                       "aeiou".contains(characters[candidateEnd]) {
-                        let target = romanized(word + String(characters[candidateEnd]), style: style).convertTarget
-                        if !target.contains(where: { $0.isASCII && $0.isLetter }) { continue }
+                       "aeiouyhs".contains(characters[candidateEnd])
+                        || ("ktpsc".contains(characters[candidateEnd]) && characters[candidateEnd] == word.last) {
+                        let completes = (1...3).contains { length in
+                            guard candidateEnd + length <= characters.count else { return false }
+                            let tail = characters[candidateEnd..<candidateEnd + length]
+                            guard tail.allSatisfy({ $0.isASCII && $0.isLetter }) else { return false }
+                            let target = romanized(word + String(tail), style: style).convertTarget
+                            return !target.contains { $0.isASCII && $0.isLetter }
+                        }
+                        if completes { continue }
                     }
                     let prefix = romanized(String(characters[kanaStart..<start]), style: style).convertTarget
                     guard !prefix.contains(where: { $0.isASCII && $0.isLetter }) else { continue }

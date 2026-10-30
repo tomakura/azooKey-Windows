@@ -35,6 +35,13 @@ import KanaKanjiConverterModule
         ("pythonnobug", "pythonのbug"),
         ("kyouhagithub", "きょうはgithub"),
         ("soshitegithub", "そしてgithub"),
+        // A final single "n" waits for the next stroke, as in plain romaji input.
+        ("opushon", "おぷしょn"),
+        ("opusyon", "おぷしょn"),
+        ("hashutsujo", "はしゅつじょ"),
+        ("chatta", "ちゃった"),
+        ("chippu", "ちっぷ"),
+        ("robotto", "ろぼっと"),
         ("İgithub", "İgithub"),
         ("arigatougozaimasu", "ありがとうございます"),
         ("konnnichiha", "こんにちは"),
@@ -140,4 +147,15 @@ import KanaKanjiConverterModule
     free_text(original)
     #expect(edit("", 2, 2) == "じ")
     #expect(edit("", 3) == "")
+}
+
+/// Learning links consecutive commits only when the new input follows the committed text.
+@Test func commitsLinkOnlyWhenInputContinuesCommittedText() {
+    #expect(continuesCommittedText("昨日は会議で今日は", "今日は"))
+    let long = "とても長い確定文字列は文脈の上限を超えても末尾で判定する"
+    #expect(continuesCommittedText(String(long.suffix(20)), long))
+    #expect(!continuesCommittedText("は", "今日は"))
+    #expect(!continuesCommittedText("別の段落", "今日は"))
+    #expect(!continuesCommittedText("", "今日は"))
+    #expect(!continuesCommittedText("今日は", ""))
 }
